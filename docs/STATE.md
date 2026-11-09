@@ -37,14 +37,19 @@ becomes public.
   already had `not_null`, so nothing replaced them.
 - `python scripts/check_public_safety.py`: 0 errors.
 
-## Next steps, in order
-1. GitHub CLI in VS Code terminals (see below), then the owner runs `gh auth login`.
-2. `gh repo create swesz/dbt-insurance-analytics --private --source . --remote origin`, then
-   `git push -u origin main`. Do not use `--push` or `git push --all`.
-3. Check that the first CI run passes (`gh run list`, `gh run watch`).
-4. Q-003: make `test01_employee_api` and `test02_hr_ext-api` private.
-5. Before going public: the owner reviews everything (Q-001), Q-004 and Q-005 are answered, and
-   this file is deleted or rewritten.
+## Pushed [V, 2026-11-08]
+- `swesz/dbt-insurance-analytics` exists on GitHub, PRIVATE, with main as its only branch
+  (remote `origin`). Push main explicitly (`git push`); never `--all`.
+- The first CI run (42561363861) passed in 1m09s with the same results as the local run: scan
+  0 errors, pytest 18 passed, `dbt build` 778 pass, 2 warn (13, 5), 0 error, 783 nodes.
+  GitHub annotated that `ubuntu-latest` is moving to Ubuntu 26 (from 2026-10-19).
+- Q-003 done: `test01_employee_api` and `test02_hr_ext-api` are private (neither had stars or
+  forks); `Financial-Sentiment-ML-DeepLearning` stays public.
+
+## Next steps
+1. Before going public: the owner reviews everything (Q-001), Q-004 and Q-005 are answered, and
+   this file is deleted or rewritten. Then
+   `gh repo edit swesz/dbt-insurance-analytics --visibility public --accept-visibility-change-consequences`.
 
 ## GitHub CLI
 gh 2.103.3 is installed in `C:\Program Files\GitHub CLI\` and is on the machine PATH [V], but
@@ -53,7 +58,8 @@ still has the old PATH, so `gh` is not found there. Either quit VS Code complete
 window) and start it again, or in each open PowerShell terminal run once:
 `$env:Path = [Environment]::GetEnvironmentVariable('Path','Machine') + ';' + [Environment]::GetEnvironmentVariable('Path','User')`.
 Without either, the full path works: `& 'C:\Program Files\GitHub CLI\gh.exe' auth login`.
-`gh auth status` reported "not logged in" on 2026-11-08.
+Logged in on 2026-11-08 as swesz (keyring), HTTPS, scopes gist, read:org, repo, workflow. The
+`workflow` scope is needed to push changes to `.github/workflows/`.
 
 ## Open items from the reviews (not fixed, low risk)
 - Premium: `coverage_start_date` / `coverage_end_date` mean the earning window in the line
@@ -79,9 +85,7 @@ trailers and a README paragraph on how the project was built. GitHub CLI only. P
 - Q-002: License. Answer (2026-11-08): MIT, copyright under the GitHub handle (`LICENSE`).
 - Q-003: Other public repos on the profile. Answer (2026-11-08): make `test01_employee_api` and
   `test02_hr_ext-api` private before the link goes out; the machine-learning repo stays public.
-  After `gh auth login`:
-  `gh repo edit swesz/<repo> --visibility private --accept-visibility-change-consequences`
-  for each of the two, or the owner does it in the GitHub settings.
+  Done 2026-11-08 [V].
 - Q-004: CLAUDE.md says known defects are tested "with `severity: warn` and thresholds", but
   with `severity: warn` dbt never applies `error_if`; the code correctly uses `severity: error`
   with `warn_if`/`error_if`. Owner to decide on the wording. Open.
