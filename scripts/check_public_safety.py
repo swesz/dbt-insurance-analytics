@@ -14,8 +14,9 @@ is still in the history, and a push publishes the history):
 5. Personal blocklist: strings listed in a file OUTSIDE the repo, so the list itself is never
    published. Default location: ~/.config/public-repo-scan/blocklist.txt, or set
    PUBLIC_SAFETY_BLOCKLIST. One entry per line; `#` starts a comment. A plain line matches
-   case-insensitively anywhere; a line starting with `word:` matches a case-sensitive whole
-   word and is reported for review instead of failing (for words that are also ordinary words).
+   case-insensitively anywhere. A line starting with `deny-word:` matches a case-insensitive
+   whole word and fails. A line starting with `word:` matches a case-sensitive whole word and is
+   reported for review instead of failing (for words that are also ordinary words).
 
 Exit code 0 if clean, 1 if anything must be fixed. Review-level findings print but do not fail.
 """
@@ -50,27 +51,30 @@ def git(*args: str) -> str:
     return result.stdout
 
 
-def load_blocklist() -> tuple[list[str], list[str]]:
+def load_blocklist() -> tuple[list[str], list[str], list[str]]:
     path = Path(os.environ.get("PUBLIC_SAFETY_BLOCKLIST", DEFAULT_BLOCKLIST))
     if not path.exists():
         print(f"WARNING: no blocklist at {path.name} in the configured folder; personal check skipped")
-        return [], []
-    deny, review = [], []
+        return [], [], []
+    deny, deny_words, review = [], [], []
     for raw in path.read_text(encoding="utf-8").splitlines():
         line = raw.split("#", 1)[0].strip()
         if not line:
             continue
-        if line.startswith("word:"):
+        if line.startswith("deny-word:"):
+            deny_words.append(line[len("deny-word:"):].strip())
+        elif line.startswith("word:"):
             review.append(line[len("word:"):].strip())
         else:
             deny.append(line)
-    return deny, review
+    return deny, deny_words, review
 
 
 def main() -> int:
     errors: list[str] = []
     reviews: list[str] = []
-    deny, review_words = load_blocklist()
+    deny, deny_words, review_words = load_blocklist()
+    deny_word_res = [re.compile(rf"\b{re.escape(w)}\b", re.IGNORECASE) for w in deny_words]
     review_res = [re.compile(rf"\b{re.escape(w)}\b") for w in review_words]
 
     def scan_text(where: str, text: str) -> None:
@@ -78,6 +82,9 @@ def main() -> int:
         for entry in deny:
             if entry.lower() in lowered:
                 errors.append(f"{where}: blocklisted string (entry #{deny.index(entry) + 1})")
+        for i, rx in enumerate(deny_word_res):
+            if rx.search(text):
+                errors.append(f"{where}: blocklisted word (deny-word #{i + 1})")
         for i, rx in enumerate(review_res):
             if rx.search(text):
                 reviews.append(f"{where}: review word (entry word #{i + 1})")

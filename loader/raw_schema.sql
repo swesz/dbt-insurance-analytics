@@ -12,8 +12,8 @@
 --                           so a key appears once per version. __deleted marks deletions.
 --   general_ledger          Fivetran-style file connector over monthly CSV exports:
 --                           every column arrives as text, plus _file/_line/_modified.
---   generator_audit         Sandbox only. Facts the generator knows and a real warehouse
---                           would not; used by reconciliation tests, never by models.
+--   generator_audit         Generated-data answer key: facts the generator knows and a
+--                           real warehouse would not; used by tests, never by models.
 
 create schema if not exists policy_admin;
 create schema if not exists billing;
@@ -243,7 +243,7 @@ create or replace table general_ledger.journal_lines (
 );
 
 -- ---------------------------------------------------------------------------------------------
--- generator_audit: sandbox-only answer key. Models must never select from it.
+-- generator_audit: answer key of the generated data. Models must never select from it.
 -- ---------------------------------------------------------------------------------------------
 
 create or replace table generator_audit.load_info (

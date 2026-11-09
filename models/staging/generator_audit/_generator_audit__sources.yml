@@ -1,6 +1,6 @@
 version: 2
 
-# Sandbox-only answer key written by the generator. Tests compare model output with it.
+# Answer key written by the data generator. Tests compare model output with it.
 # Models must never select from these tables: a real warehouse would not have them.
 sources:
   - name: generator_audit
