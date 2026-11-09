@@ -37,7 +37,7 @@ models:
           # warn_if, which gives "warn on the planted count, fail above the threshold".
           - relationships:
               arguments:
-                to: ref('stg_policy_admin__policies')
+                to: ref('dim_policies')
                 field: policy_number
               config:
                 severity: error
@@ -54,7 +54,7 @@ models:
         data_tests:
           - relationships:
               arguments:
-                to: ref('stg_policy_admin__policies')
+                to: ref('dim_policies')
                 field: policy_id
       - name: has_matching_policy
         description: False for orphan claims (no policy with this number).
