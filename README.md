@@ -53,6 +53,32 @@ Three databases stand in for three warehouse projects: `raw` is written only by 
 (`staging`, `core`, `premium`, ...), because the database already names the environment. See
 [docs/architecture.md](docs/architecture.md) and [docs/decisions.md](docs/decisions.md).
 
+## Why DuckDB and not BigQuery
+
+The models target a cloud warehouse workflow, but run on DuckDB, because BigQuery without
+billing (the sandbox) cannot run this project. Google's
+[sandbox page](https://cloud.google.com/bigquery/docs/sandbox) lists these limits:
+
+- no DML statements (MERGE, UPDATE, DELETE);
+- no streaming and no Data Transfer Service;
+- every table, view and partition expires after 60 days;
+- a lifetime 10 GiB storage limit that is not refunded when data is deleted.
+
+| Feature used here | BigQuery sandbox | DuckDB |
+|---|---|---|
+| Snapshots (`snapshots/`) | no: dbt snapshots run a MERGE | yes |
+| Incremental model (`fct_claim_transactions`) | no: dbt-bigquery's merge, insert_overwrite and microbatch strategies all use MERGE | yes |
+| History older than 60 days (snapshots, month-end close simulation) | no: tables expire | yes |
+| Rebuilding everything on every run | eats into a lifetime storage limit | unlimited |
+| Loader-style upserts, soft deletes, CDC in raw | no: needs DML or streaming | yes |
+| CI on every push | needs cloud credentials in the repo's secrets | no credentials at all |
+| Anyone can clone and run it | needs their own Google Cloud project | `uv sync` and go |
+
+Enabling billing removes the limits, and this volume would likely stay within the free usage
+tier, but it requires a payment method, and everyone who clones the repo would need their own
+billed project. Moving to BigQuery later is mostly a new profile plus a few date functions; see
+[docs/decisions.md](docs/decisions.md) (D-001).
+
 ## Quickstart
 
 Requires [uv](https://docs.astral.sh/uv/). From the repo root:
