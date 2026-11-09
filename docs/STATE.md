@@ -49,9 +49,15 @@ DuckDB only, newest versions. Three databases: raw, dev, prod. Generated data wi
 issues at realistic volume. Repo name `dbt-insurance-analytics`. Keep the Co-Authored-By
 trailers and a README paragraph on how the project was built. GitHub CLI only. Private first.
 
-## Open questions for the owner
-- Q-001: The README paragraph "How this was built" speaks in the owner's voice. Confirm or edit it.
-- Q-002: License. There is none yet; MIT is common for portfolio repos.
+## Questions answered by the owner
+- Q-001: The README paragraph "How this was built" speaks in the owner's voice. Answer
+  (2026-11-08): keep it for now; the owner reviews it with the rest before going public.
+- Q-002: License. Answer (2026-11-08): MIT, copyright under the GitHub handle (`LICENSE`).
+- Q-003: Other public repos on the profile. Answer (2026-11-08): make `test01_employee_api` and
+  `test02_hr_ext-api` private before the link goes out; the machine-learning repo stays public.
+  This needs `gh auth login` first, then
+  `gh repo edit swesz/<repo> --visibility private --accept-visibility-change-consequences`
+  for each of the two, or the owner does it in the GitHub settings.
 
 ## Working pattern for parallel jobs
 Give each job its own files: `DBT_DUCKDB_DEV_PATH=warehouse/dev_<name>.duckdb`,
