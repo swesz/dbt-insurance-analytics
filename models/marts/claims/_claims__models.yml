@@ -8,17 +8,23 @@ models:
       (delete+insert on financial_event_id, with a lookback on the loader timestamp); the
       strategy is explained at the top of the model. Sum paid_amount for net paid and
       reserve_change_amount for the change in case reserves.
+    config:
+      contract:
+        enforced: true
     columns:
       - name: financial_event_id
+        data_type: varchar
         description: "Primary key: claim_transaction_id and event_type, e.g. '1234-PAYMENT_VOID'."
         data_tests:
           - unique
           - not_null
       - name: claim_transaction_id
+        data_type: bigint
         description: Source transaction.
         data_tests:
           - not_null
       - name: event_type
+        data_type: varchar
         description: PAYMENT, RECOVERY, RESERVE_CHANGE or PAYMENT_VOID.
         data_tests:
           - not_null
@@ -26,10 +32,13 @@ models:
               arguments:
                 values: ['PAYMENT', 'RECOVERY', 'RESERVE_CHANGE', 'PAYMENT_VOID']
       - name: is_void_reversal
+        data_type: boolean
         description: True on the reversal of a voided payment.
       - name: transaction_type
+        data_type: varchar
         description: Source transaction type.
       - name: claim_id
+        data_type: bigint
         description: The claim.
         data_tests:
           - not_null
@@ -38,6 +47,7 @@ models:
                 to: ref('dim_claims')
                 field: claim_id
       - name: exposure_id
+        data_type: bigint
         description: The exposure.
         data_tests:
           - not_null
@@ -46,6 +56,7 @@ models:
                 to: ref('dim_claim_exposures')
                 field: exposure_id
       - name: coverage_code
+        data_type: varchar
         description: Coverage of the exposure.
         data_tests:
           - relationships:
@@ -53,40 +64,53 @@ models:
                 to: ref('coverages')
                 field: coverage_code
       - name: line_of_business
+        data_type: varchar
         description: AUTO or HOME.
         data_tests:
           - not_null
       - name: cost_category
+        data_type: varchar
         description: LOSS or EXPENSE.
         data_tests:
           - not_null
       - name: expense_type
+        data_type: varchar
         description: DCC or AO for EXPENSE.
       - name: reserve_reason
+        data_type: varchar
         description: Why a reserve changed.
       - name: transaction_date
+        data_type: date
         description: Source transaction date.
       - name: event_date
+        data_type: date
         description: Date the event is dated by (the void date for a reversal).
       - name: entered_at
+        data_type: timestamp
         description: When the event was entered (the void timestamp for a reversal).
       - name: accounting_period
+        data_type: varchar
         description: Booked period, 'YYYY-MM'.
         data_tests:
           - not_null
       - name: paid_amount
+        data_type: decimal(18, 2)
         description: Signed contribution to net paid.
         data_tests:
           - not_null
       - name: reserve_change_amount
+        data_type: decimal(18, 2)
         description: Signed change to the case reserve.
         data_tests:
           - not_null
       - name: loss_date
+        data_type: date
         description: Date of the loss.
       - name: accident_year
+        data_type: integer
         description: Year of loss_date.
       - name: source_loaded_at
+        data_type: timestamp
         description: Latest loader write among the source rows; the incremental high-water mark.
         data_tests:
           - not_null
@@ -96,12 +120,16 @@ models:
       Month-end balances per exposure x cost category x accounting period through the valuation
       period: paid and reserve change in the period, ITD net paid, outstanding case reserve and
       incurred. Test-policy claims excluded.
+    config:
+      contract:
+        enforced: true
     data_tests:
       - dbt_utils.unique_combination_of_columns:
           arguments:
             combination_of_columns: ['exposure_id', 'cost_category', 'accounting_period']
     columns:
       - name: exposure_id
+        data_type: bigint
         description: The exposure.
         data_tests:
           - not_null
@@ -110,6 +138,7 @@ models:
                 to: ref('dim_claim_exposures')
                 field: exposure_id
       - name: cost_category
+        data_type: varchar
         description: LOSS or EXPENSE.
         data_tests:
           - not_null
@@ -117,6 +146,7 @@ models:
               arguments:
                 values: ['LOSS', 'EXPENSE']
       - name: accounting_period
+        data_type: varchar
         description: Period the balances are at the end of.
         data_tests:
           - not_null
@@ -125,16 +155,20 @@ models:
                 to: ref('accounting_periods')
                 field: accounting_period
       - name: period_end_date
+        data_type: date
         description: Last day of the period.
         data_tests:
           - not_null
       - name: claim_id
+        data_type: bigint
         description: The claim.
         data_tests:
           - not_null
       - name: coverage_code
+        data_type: varchar
         description: Coverage of the exposure.
       - name: line_of_business
+        data_type: varchar
         description: AUTO or HOME.
         data_tests:
           - not_null
@@ -142,26 +176,33 @@ models:
               arguments:
                 values: ['AUTO', 'HOME']
       - name: loss_date
+        data_type: date
         description: Date of the loss.
       - name: accident_year
+        data_type: integer
         description: Year of loss_date.
       - name: period_paid_amount
+        data_type: decimal(18, 2)
         description: Net paid booked in the period.
         data_tests:
           - not_null
       - name: period_reserve_change_amount
+        data_type: decimal(18, 2)
         description: Case reserve change booked in the period.
         data_tests:
           - not_null
       - name: itd_paid_amount
+        data_type: decimal(18, 2)
         description: Net paid booked in or before the period.
         data_tests:
           - not_null
       - name: case_reserve_amount
+        data_type: decimal(18, 2)
         description: Outstanding case reserve at period end.
         data_tests:
           - not_null
       - name: incurred_amount
+        data_type: decimal(18, 2)
         description: itd_paid_amount + case_reserve_amount.
         data_tests:
           - not_null

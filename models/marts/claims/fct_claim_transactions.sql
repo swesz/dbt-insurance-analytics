@@ -75,7 +75,7 @@ final as (
         paid_amount,
         reserve_change_amount,
         loss_date,
-        accident_year,
+        cast(accident_year as integer) as accident_year,
         source_loaded_at
     from financial_events
     {% if is_incremental() %}
