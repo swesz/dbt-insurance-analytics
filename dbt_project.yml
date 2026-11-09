@@ -19,6 +19,9 @@ vars:
   # The last day the generator simulates. Month-end tables stop at the period containing it.
   valuation_date: "2026-09-30"
   history_start_date: "2022-01-01"
+  # fct_claim_transactions reprocesses rows loaded this many days before its high-water mark,
+  # so late-arriving CDC rows are picked up (see the model's header).
+  claims_incremental_lookback_days: 3
 
 # Schemas name layers and domains, not environments: dev and prod are separate database files
 # (profiles.yml), so both use the same schema names. macros/generate_schema_name.sql makes dbt

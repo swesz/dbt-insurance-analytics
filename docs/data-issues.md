@@ -27,3 +27,5 @@ generator records how many rows each issue affects in `raw.generator_audit.plant
 | `GL_AMOUNT_FORMAT_CHANGE` | general_ledger.journal_lines | from 2025-01 the export writes thousands separators: `'1,234.56'` | staging strips `,` before casting | not_null on parsed amounts |
 | `GL_MANUAL_RECLASS` | general_ledger.journal_lines | 2024-06: accountants moved written premium between AUTO and HOME with a manual journal | documented in `seeds/gl_reconciling_items.csv` | GL reconciliation test |
 | `GL_CLAIMS_INTERFACE_TIMING` | general_ledger.journal_lines | 2025-08: the claims interface missed the payments entered on the period's last day; they were posted in 2025-09 | documented in `seeds/gl_reconciling_items.csv` | GL reconciliation test |
+
+Counting note: MALFORMED_POLICY_NUMBERS counts claim versions (CDC rows), not claims: its rows fall on fewer distinct claims.

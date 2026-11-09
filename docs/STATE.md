@@ -23,7 +23,7 @@ to the old session, so judge their results from `git log` and by rerunning every
 |---|---|---|
 | generator (done) | `generator/`, `loader/` (not `raw_schema.sql`), exact counts in `docs/data-issues.md` | done: `warehouse/RAW_READY` exists |
 | premium (done) | `models/staging/policy_admin`, `intermediate/premium`, `marts/premium`, policy dims in `marts/core`, `tests/premium`, `docs/guide-premium.md` | validated against real data |
-| claims | `models/staging/claims`, `intermediate/claims`, `marts/claims`, claim dims, the triangle, `analyses/`, `tests/claims`, `docs/guide-claims.md` | same |
+| claims (done) | `models/staging/claims`, `intermediate/claims`, `marts/claims`, claim dims, the triangle, `analyses/`, `tests/claims`, `docs/guide-claims.md` | same |
 | accounting | `models/staging/billing`, `staging/general_ledger`, `intermediate/accounting`, `marts/accounting`, `tests/accounting`, `seeds/gl_reconciling_items.csv`, `docs/guide-accounting.md` | reconciliation has no unexplained differences |
 | actuarial + snapshots | `marts/actuarial` (not the triangle), `snapshots/`, `models/exposures.yml`, `tests/actuarial`, `scripts/simulate_month_end_closes.py`, `docs/guide-snapshots-and-actuarial.md` | simulation shows real snapshot history |
 
@@ -57,6 +57,16 @@ to the old session, so judge their results from `git log` and by rerunning every
 - Own definitions, to review: `in_force_term_premium` and `annualized_in_force_premium`.
 - Run its slice with `--indirect-selection=cautious`, so tests from other domains don't run in a
   partial dev file.
+
+## Claims results (from its final report)
+- Its slice builds 316 nodes: 314 pass and 2 warn, the planted LOSS_OUTSIDE_TERM (13) and
+  ORPHAN_CLAIMS (5) at their exact counts. Period and accident-year control totals match the
+  generator to the cent, and every planted count matches.
+- Incremental check: full refresh and incremental runs give identical results; a 3-day lookback
+  restored deleted late rows.
+- To review: `is_loss_outside_term` is null for the orphans. Warn tests use
+  `severity: error` with `warn_if`/`error_if`, because with `severity: warn` dbt never applies
+  `error_if`.
 
 ## Next steps, in order
 1. Confirm every agent has finished: `warehouse/RAW_READY` exists, the commits have stopped,

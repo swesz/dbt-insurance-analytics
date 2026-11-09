@@ -80,3 +80,23 @@ IDs are permanent and never reused. Status: proposed, accepted, superseded (by D
 - Status: accepted 2026-11-08
 - The source keeps no add or remove dates for vehicles, so every month of a policy uses today's
   count. Revisit if the raw contract gains unit history.
+
+## D-010: fct_claim_transactions is incremental with delete+insert and a loader-time lookback
+- Status: accepted 2026-11-08
+- Unique key `financial_event_id`; each run rebuilds the events whose source rows were loaded
+  within `claims_incremental_lookback_days` (3) of the last high-water mark, so late-arriving
+  CDC rows and voids are picked up. delete+insert was chosen over merge for its simpler, fully
+  replaced key set; the reasoning is in the model's header.
+- Check: `assert_fct_claim_transactions_matches_events` compares the fact with a full rebuild on
+  every build. A full refresh and repeated incremental runs gave identical results [V, claims build].
+- Known limit: an event whose source row disappears is not removed by an incremental run.
+
+## D-011: A voided payment is two events
+- Status: accepted 2026-11-08
+- The payment stays in the period it was booked in, and a PAYMENT_VOID reversal is booked at the
+  void, because closed periods never change (docs/source-systems.md 3f).
+
+## D-012: Loss development triangles are evaluated on booked accounting periods
+- Status: accepted 2026-11-08
+- A cell at age n holds what was booked by the end of that evaluation period, so the triangle
+  agrees with the ledger. It includes orphan claims and excludes expenses.
