@@ -7,7 +7,10 @@ models:
       accident quarter when triangle_grain = 'QUARTERLY') and development age in months,
       cumulative net paid loss, case reserve, incurred loss and reported claim count, evaluated
       at the age's period end on booked periods. Only cells evaluated on or before the
-      valuation date exist. Test-policy and deleted claims excluded; orphan claims included.
+      valuation date exist. The ANNUAL grain is evaluated at year ends, so its latest diagonal
+      is the last year end; ANNUAL_AT_VALUATION is evaluated at the valuation date and its
+      anniversaries, so its latest diagonal is the valuation date. Test-policy and deleted
+      claims excluded; orphan claims included.
     data_tests:
       - dbt_utils.unique_combination_of_columns:
           arguments:
@@ -23,12 +26,15 @@ models:
             expression: "evaluation_date <= cast('{{ var(\"valuation_date\") }}' as date)"
     columns:
       - name: triangle_grain
-        description: ANNUAL (accident years, ages 12, 24, ...) or QUARTERLY (accident quarters, ages 3, 6, ...).
+        description: >
+          ANNUAL (accident years at year ends, ages 12, 24, ...), QUARTERLY (accident quarters
+          at quarter ends, ages 3, 6, ...) or ANNUAL_AT_VALUATION (accident years at the
+          valuation date and its anniversaries, ages 9, 21, ... for a September valuation).
         data_tests:
           - not_null
           - accepted_values:
               arguments:
-                values: ['ANNUAL', 'QUARTERLY']
+                values: ['ANNUAL', 'QUARTERLY', 'ANNUAL_AT_VALUATION']
       - name: line_of_business
         description: AUTO or HOME.
         data_tests:

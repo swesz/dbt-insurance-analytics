@@ -160,7 +160,8 @@ AY 2025       x
   adequate: rising incurred means reserves were too low.
 - **Read down a column** to compare accident years at the same maturity, a fair comparison, since
   each is the same number of months old.
-- **The diagonal** (the last cell of each row) is the book as of the latest evaluation date.
+- **The diagonal** (the last cell of each row) is the book as of the latest evaluation date. In
+  this year-end triangle that is the last year end, not the valuation date (see below).
 - **The empty lower-right** is the future. The chain-ladder method
   (`analyses/chain_ladder_development_factors.sql`) fills it in. The ratio of the sums of two
   neighboring columns (the volume-weighted age-to-age factor) says how much losses typically grow
@@ -172,6 +173,36 @@ closed. Only cells whose evaluation date is on or before the valuation date exis
 valuation date of 2026-09-30, accident year 2026 has no 12-month cell yet, so the quarterly
 variant (`triangle_grain = 'QUARTERLY'`, accident quarters at ages 3, 6, 9, ...) is there to show
 recent quarters.
+
+### Which diagonal a reserve starts from
+
+The `ANNUAL` grain above is the standard year-end triangle, so its latest diagonal is
+2025-12-31, nine months before the valuation date. That suits comparing accident years at whole
+ages, but it is the wrong starting point for a reserve at 2026-09-30. Projecting the 2025-12-31
+figures to ultimate and subtracting today's incurred counts the development in between twice:
+AUTO accident year 2025 had $6,454,093.90 incurred at 2025-12-31 and $6,877,610.57 at
+2026-09-30, and the $423,516.67 between them would sit both in today's incurred and in the
+projection.
+
+So the triangle has a third grain, `ANNUAL_AT_VALUATION`: accident years evaluated on the
+valuation date and its anniversaries (2026-09-30, 2025-09-30, ...), which makes the ages 9, 21,
+33, 45 and 57 months. Its latest diagonal is the valuation date, the same figures as `dim_claims`
+and `rpt_loss_ratio_by_accident_year`, and
+`tests/claims/assert_triangle_latest_diagonal_matches_control_totals.sql` checks that diagonal
+against the generator's control totals. The chain-ladder analysis uses this grain, so its IBNR is
+the projected ultimate minus incurred at the valuation date.
+
+**The current accident year gets no projection.** Accident year 2026 is 9 months old: only its
+January to September accidents have happened. Its factor would be the one from 9 to 21 months,
+learned from earlier years' age-9 cells (which also held only January to September accidents)
+and their age-21 cells (which hold the whole year). For AUTO that factor is 1.4775, and the
+quarterly cells show what it is made of: 1.0285 is the January to September accidents
+developing, and 0.4490 is the October to December accidents, which had not happened at age 9.
+Applied to 2026, the factor would project accidents that have not happened yet. Those will fall
+in the unexpired months of policies still in force, which the unearned premium covers; a loss
+reserve is for accidents that already happened. So the analysis shows 2026's reported incurred
+and leaves its ultimate and IBNR empty. (Reserving estimates the current year's IBNR another
+way, for example from an expected loss ratio on the premium earned so far.)
 
 ## 9. Worked example: one claim, month by month
 

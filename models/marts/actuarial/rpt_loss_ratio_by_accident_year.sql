@@ -13,9 +13,12 @@
 -- The catch: the incurred loss of a recent accident year is not final. Claims are still being
 -- reported (IBNR, especially bodily injury and liability) and case reserves revised, so the
 -- latest years' ratios are expected to rise as they mature. development_age_months says how
--- mature each row is; rpt_loss_development_triangle shows the same figures at every earlier
--- age, and analyses/chain_ladder_development_factors.sql projects them to ultimate. Compare
--- accident years at equal ages, not at the valuation date.
+-- mature each row is. These incurred figures are the latest diagonal of the
+-- ANNUAL_AT_VALUATION grain of rpt_loss_development_triangle, which also shows each accident
+-- year at every earlier anniversary of the valuation date; its year-end ANNUAL grain stops at
+-- the last year end, so its figures are older than these.
+-- analyses/chain_ladder_development_factors.sql projects them to ultimate. Compare accident
+-- years at equal ages, not at the valuation date.
 --
 -- Worked example (round numbers, not this data): AY 2024 AUTO earned $9.0M in calendar 2024,
 -- and its accidents show $5.8M incurred at 2026-09-30 (age 33 months): 64.4%. AY 2026 is only
@@ -97,8 +100,9 @@ final as (
         cast(accident_year as integer) as accident_year,
         line_of_business,
         cast('{{ var("valuation_date") }}' as date) as valuation_date,
-        -- Months from the start of the accident year to the valuation date: 12 at the end of
-        -- the year itself, 24 a year later. The same age as the triangle's columns.
+        -- Months from the start of the accident year to the valuation date: 9 for accident
+        -- year 2026 at a 2026-09-30 valuation, 21 for 2025, and so on. The same ages as the
+        -- triangle's ANNUAL_AT_VALUATION cells (not its year-end ANNUAL ones).
         cast(
             (year(cast('{{ var("valuation_date") }}' as date)) - accident_year) * 12
                 + month(cast('{{ var("valuation_date") }}' as date))
