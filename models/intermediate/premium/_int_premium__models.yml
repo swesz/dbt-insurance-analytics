@@ -1,0 +1,243 @@
+version: 2
+
+models:
+  - name: int_premium__transaction_lines_booked
+    description: >
+      One row per premium transaction line of a real policy (QA test policies excluded), with
+      the transaction header, term and policy attributes, the accounting period the line is
+      booked in (booking rule, docs/source-systems.md 3c, macro booked_accounting_period) and
+      its earning window [coverage_start_date, coverage_end_date).
+    columns:
+      - name: transaction_line_id
+        description: Primary key.
+        data_tests:
+          - unique
+          - not_null
+      - name: transaction_id
+        description: The transaction header.
+        data_tests:
+          - not_null
+      - name: policy_id
+        description: The policy.
+        data_tests:
+          - not_null
+      - name: term_id
+        description: The term.
+        data_tests:
+          - not_null
+      - name: policy_number
+        description: Policy number.
+      - name: policyholder_id
+        description: The policyholder.
+      - name: line_of_business
+        description: AUTO or HOME.
+        data_tests:
+          - not_null
+          - accepted_values:
+              arguments:
+                values: ['AUTO', 'HOME']
+      - name: risk_state
+        description: State of the insured risk.
+      - name: coverage_code
+        description: Coverage.
+        data_tests:
+          - not_null
+          - relationships:
+              arguments:
+                to: ref('coverages')
+                field: coverage_code
+      - name: transaction_type
+        description: NEW_BUSINESS, RENEWAL, ENDORSEMENT, CANCELLATION or REINSTATEMENT.
+      - name: transaction_date
+        description: The date the transaction is dated.
+      - name: effective_date
+        description: When the change takes effect on coverage.
+      - name: is_backdated
+        description: True when effective_date is before transaction_date.
+      - name: transaction_created_at
+        description: When the transaction was entered.
+      - name: term_number
+        description: Term number within the policy.
+      - name: term_effective_date
+        description: First covered day of the term.
+      - name: term_expiration_date
+        description: Exclusive end of the term.
+      - name: term_days
+        description: Days in the term.
+      - name: written_premium
+        description: Signed written premium of the line.
+        data_tests:
+          - not_null
+      - name: accounting_period
+        description: The booked accounting period ('YYYY-MM').
+        data_tests:
+          - not_null
+          - relationships:
+              arguments:
+                to: ref('accounting_periods')
+                field: accounting_period
+      - name: transaction_date_period
+        description: The calendar period of transaction_date.
+      - name: is_booked_after_close
+        description: True when the line was entered after its own month closed, so it is booked later.
+      - name: coverage_start_date
+        description: First day of the earning window (the transaction's effective date).
+      - name: coverage_end_date
+        description: Exclusive end of the earning window (the term's expiration date).
+      - name: window_days
+        description: Days in the earning window; 0 means fully earned at once.
+        data_tests:
+          - not_null
+          - dbt_utils.accepted_range:
+              arguments:
+                min_value: 0
+
+  - name: int_premium__line_earnings_by_period
+    description: >
+      One row per transaction line and accounting period, from the booked period through the
+      period of the line's last earning day, capped at the valuation period. Earned in a period
+      is the difference of inception-to-date earned at consecutive period ends
+      (docs/source-systems.md 3d, decision D-006).
+    data_tests:
+      - dbt_utils.unique_combination_of_columns:
+          arguments:
+            combination_of_columns: ['transaction_line_id', 'accounting_period']
+    columns:
+      - name: transaction_line_id
+        description: The transaction line.
+        data_tests:
+          - not_null
+          - relationships:
+              arguments:
+                to: ref('int_premium__transaction_lines_booked')
+                field: transaction_line_id
+      - name: accounting_period
+        description: The accounting period.
+        data_tests:
+          - not_null
+      - name: written_premium
+        description: The line's written premium in its booked period, 0 in later periods.
+      - name: itd_earned_premium
+        description: Inception-to-date earned premium of the line at the period end.
+      - name: earned_premium
+        description: Earned in the period, ITD at this period end minus ITD at the prior one.
+      - name: unearned_premium_end
+        description: Unearned premium of the line at the period end (written minus ITD earned).
+
+unit_tests:
+  # The booking rule, docs/source-systems.md 3c, tested through the model that applies it.
+  # The periods are the real 2024 calendar: January closes at the end of 2024-02-06, February
+  # at the end of 2024-03-06.
+  - name: test_booking_rule_periods
+    description: >
+      Same month; entered after month end but before the close; entered after the close;
+      entered after two closes. A test policy's line is dropped.
+    model: int_premium__transaction_lines_booked
+    given:
+      - input: ref('stg_policy_admin__policy_transaction_lines')
+        rows:
+          - {transaction_line_id: 1, transaction_id: 101, coverage_code: BI, written_premium: 100.00}
+          - {transaction_line_id: 2, transaction_id: 102, coverage_code: BI, written_premium: 10.00}
+          - {transaction_line_id: 3, transaction_id: 103, coverage_code: BI, written_premium: 10.00}
+          - {transaction_line_id: 4, transaction_id: 104, coverage_code: BI, written_premium: 10.00}
+          - {transaction_line_id: 5, transaction_id: 105, coverage_code: BI, written_premium: 50.00}
+      - input: ref('stg_policy_admin__policy_transactions')
+        rows:
+          # Same month: dated and entered in January.
+          - {transaction_id: 101, policy_id: 1, term_id: 11, transaction_type: NEW_BUSINESS,
+             transaction_date: '2024-01-15', effective_date: '2024-01-15',
+             created_at: '2024-01-15 09:00:00', is_test_policy: false}
+          # Dated in January, entered on January's close date: the period is still open until
+          # the end of that day, so it makes January.
+          - {transaction_id: 102, policy_id: 1, term_id: 11, transaction_type: ENDORSEMENT,
+             transaction_date: '2024-01-29', effective_date: '2024-01-29',
+             created_at: '2024-02-06 17:30:00', is_test_policy: false}
+          # Dated in January, entered the morning after January closed: next open is February.
+          - {transaction_id: 103, policy_id: 1, term_id: 11, transaction_type: ENDORSEMENT,
+             transaction_date: '2024-01-30', effective_date: '2024-01-30',
+             created_at: '2024-02-07 08:00:00', is_test_policy: false}
+          # Dated in January, entered after February closed too: lands in March.
+          - {transaction_id: 104, policy_id: 1, term_id: 11, transaction_type: ENDORSEMENT,
+             transaction_date: '2024-01-25', effective_date: '2024-01-25',
+             created_at: '2024-03-07 10:00:00', is_test_policy: false}
+          # QA test policy: excluded from everything downstream of staging.
+          - {transaction_id: 105, policy_id: 9000001, term_id: 12, transaction_type: NEW_BUSINESS,
+             transaction_date: '2024-01-15', effective_date: '2024-01-15',
+             created_at: '2024-01-15 09:00:00', is_test_policy: true}
+      - input: ref('stg_policy_admin__policy_terms')
+        rows:
+          - {term_id: 11, policy_id: 1, term_number: 1, term_effective_date: '2024-01-15',
+             term_expiration_date: '2024-07-15', term_days: 182}
+          - {term_id: 12, policy_id: 9000001, term_number: 1, term_effective_date: '2024-01-15',
+             term_expiration_date: '2024-07-15', term_days: 182}
+      - input: ref('stg_policy_admin__policies')
+        rows:
+          - {policy_id: 1, policy_number: PA-0000001, line_of_business: AUTO, risk_state: TX}
+          - {policy_id: 9000001, policy_number: PA-9000001, line_of_business: AUTO, risk_state: TX}
+      - input: ref('accounting_periods')
+        rows:
+          - {accounting_period: '2024-01', period_start_date: '2024-01-01', period_end_date: '2024-01-31', close_date: '2024-02-06'}
+          - {accounting_period: '2024-02', period_start_date: '2024-02-01', period_end_date: '2024-02-29', close_date: '2024-03-06'}
+          - {accounting_period: '2024-03', period_start_date: '2024-03-01', period_end_date: '2024-03-31', close_date: '2024-04-04'}
+          - {accounting_period: '2024-04', period_start_date: '2024-04-01', period_end_date: '2024-04-30', close_date: '2024-05-06'}
+    expect:
+      rows:
+        - {transaction_line_id: 1, accounting_period: '2024-01', is_booked_after_close: false, window_days: 182}
+        - {transaction_line_id: 2, accounting_period: '2024-01', is_booked_after_close: false, window_days: 168}
+        - {transaction_line_id: 3, accounting_period: '2024-02', is_booked_after_close: true, window_days: 167}
+        - {transaction_line_id: 4, accounting_period: '2024-03', is_booked_after_close: true, window_days: 172}
+
+  # The earning formula, docs/source-systems.md 3d. Lines 1-3 are the worked example in
+  # docs/guide-premium.md: a 6-month term [2024-01-01, 2024-07-01) of 182 days, with
+  #   1  new business, 600.00, booked 2024-01, earning over the whole term;
+  #   2  a backdated endorsement, +87.03 (a +120 full-term change for the 132 days left),
+  #      effective 2024-02-20 but dated 2024-03-05, so booked 2024-03: March catches up the
+  #      10 February days on top of its own 31;
+  #   3  a cancellation effective 2024-05-16, -181.98 (720 in force x 46 / 182), earning
+  #      negatively over its 46 days so that nothing is earned after the cancellation.
+  # Line 4 has a zero-day window and is fully earned in its booked period.
+  # The expected numbers were computed by hand (Python Decimal, half away from zero), not by
+  # this model. Nothing has a row in 2024-07: every window ends by 2024-07-01.
+  - name: test_earning_formula_itd_differences
+    description: >
+      A normal line, a backdated endorsement catching up, a cancellation line and a zero-day
+      window, through month-end ITD differences.
+    model: int_premium__line_earnings_by_period
+    overrides:
+      vars:
+        valuation_date: '2024-07-31'
+    given:
+      - input: ref('int_premium__transaction_lines_booked')
+        rows:
+          - {transaction_line_id: 1, accounting_period: '2024-01', written_premium: 600.00,
+             coverage_start_date: '2024-01-01', coverage_end_date: '2024-07-01', window_days: 182}
+          - {transaction_line_id: 2, accounting_period: '2024-03', written_premium: 87.03,
+             coverage_start_date: '2024-02-20', coverage_end_date: '2024-07-01', window_days: 132}
+          - {transaction_line_id: 3, accounting_period: '2024-05', written_premium: -181.98,
+             coverage_start_date: '2024-05-16', coverage_end_date: '2024-07-01', window_days: 46}
+          - {transaction_line_id: 4, accounting_period: '2024-04', written_premium: 10.00,
+             coverage_start_date: '2024-07-01', coverage_end_date: '2024-07-01', window_days: 0}
+      - input: ref('accounting_periods')
+        rows:
+          - {accounting_period: '2024-01', period_start_date: '2024-01-01', period_end_date: '2024-01-31', close_date: '2024-02-06'}
+          - {accounting_period: '2024-02', period_start_date: '2024-02-01', period_end_date: '2024-02-29', close_date: '2024-03-06'}
+          - {accounting_period: '2024-03', period_start_date: '2024-03-01', period_end_date: '2024-03-31', close_date: '2024-04-04'}
+          - {accounting_period: '2024-04', period_start_date: '2024-04-01', period_end_date: '2024-04-30', close_date: '2024-05-06'}
+          - {accounting_period: '2024-05', period_start_date: '2024-05-01', period_end_date: '2024-05-31', close_date: '2024-06-06'}
+          - {accounting_period: '2024-06', period_start_date: '2024-06-01', period_end_date: '2024-06-30', close_date: '2024-07-04'}
+          - {accounting_period: '2024-07', period_start_date: '2024-07-01', period_end_date: '2024-07-31', close_date: '2024-08-06'}
+    expect:
+      rows:
+        - {transaction_line_id: 1, accounting_period: '2024-01', written_premium: 600.00, itd_earned_premium: 102.20, earned_premium: 102.20, unearned_premium_end: 497.80}
+        - {transaction_line_id: 1, accounting_period: '2024-02', written_premium: 0.00, itd_earned_premium: 197.80, earned_premium: 95.60, unearned_premium_end: 402.20}
+        - {transaction_line_id: 1, accounting_period: '2024-03', written_premium: 0.00, itd_earned_premium: 300.00, earned_premium: 102.20, unearned_premium_end: 300.00}
+        - {transaction_line_id: 1, accounting_period: '2024-04', written_premium: 0.00, itd_earned_premium: 398.90, earned_premium: 98.90, unearned_premium_end: 201.10}
+        - {transaction_line_id: 1, accounting_period: '2024-05', written_premium: 0.00, itd_earned_premium: 501.10, earned_premium: 102.20, unearned_premium_end: 98.90}
+        - {transaction_line_id: 1, accounting_period: '2024-06', written_premium: 0.00, itd_earned_premium: 600.00, earned_premium: 98.90, unearned_premium_end: 0.00}
+        - {transaction_line_id: 2, accounting_period: '2024-03', written_premium: 87.03, itd_earned_premium: 27.03, earned_premium: 27.03, unearned_premium_end: 60.00}
+        - {transaction_line_id: 2, accounting_period: '2024-04', written_premium: 0.00, itd_earned_premium: 46.81, earned_premium: 19.78, unearned_premium_end: 40.22}
+        - {transaction_line_id: 2, accounting_period: '2024-05', written_premium: 0.00, itd_earned_premium: 67.25, earned_premium: 20.44, unearned_premium_end: 19.78}
+        - {transaction_line_id: 2, accounting_period: '2024-06', written_premium: 0.00, itd_earned_premium: 87.03, earned_premium: 19.78, unearned_premium_end: 0.00}
+        - {transaction_line_id: 3, accounting_period: '2024-05', written_premium: -181.98, itd_earned_premium: -63.30, earned_premium: -63.30, unearned_premium_end: -118.68}
+        - {transaction_line_id: 3, accounting_period: '2024-06', written_premium: 0.00, itd_earned_premium: -181.98, earned_premium: -118.68, unearned_premium_end: 0.00}
+        - {transaction_line_id: 4, accounting_period: '2024-04', written_premium: 10.00, itd_earned_premium: 10.00, earned_premium: 10.00, unearned_premium_end: 0.00}

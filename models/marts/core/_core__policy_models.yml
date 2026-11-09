@@ -1,0 +1,383 @@
+version: 2
+
+models:
+  - name: dim_dates
+    description: >
+      One row per calendar day over the accounting calendar in seeds/accounting_periods.csv,
+      with calendar attributes and the accounting period of the day.
+    columns:
+      - name: date_day
+        description: The date. Primary key.
+        data_tests:
+          - unique
+          - not_null
+      - name: calendar_year
+        description: Calendar year.
+      - name: calendar_quarter
+        description: Calendar quarter, 1-4.
+      - name: calendar_month
+        description: Calendar month, 1-12.
+      - name: month_name
+        description: Month name.
+      - name: day_of_month
+        description: Day of the month.
+      - name: day_of_week
+        description: ISO day of week, 1 = Monday ... 7 = Sunday.
+        data_tests:
+          - accepted_values:
+              arguments:
+                values: [1, 2, 3, 4, 5, 6, 7]
+                quote: false
+      - name: day_name
+        description: Day name.
+      - name: is_weekday
+        description: Monday to Friday; the business days of the close calendar.
+      - name: month_start_date
+        description: First day of the calendar month.
+      - name: accounting_period
+        description: Accounting period of the day.
+        data_tests:
+          - not_null
+          - relationships:
+              arguments:
+                to: ref('dim_accounting_periods')
+                field: accounting_period
+      - name: fiscal_year
+        description: Fiscal year (equals the calendar year).
+      - name: fiscal_quarter
+        description: Fiscal quarter.
+      - name: period_end_date
+        description: Last day of the day's accounting period.
+      - name: is_period_end
+        description: True on the last day of an accounting period.
+      - name: is_on_or_before_valuation
+        description: True on and before the valuation date (var valuation_date).
+
+  - name: dim_accounting_periods
+    description: >
+      One row per accounting period (calendar month) from seeds/accounting_periods.csv, with a
+      sequence number and the period's status at the valuation date.
+    columns:
+      - name: accounting_period
+        description: "'YYYY-MM'. Primary key."
+        data_tests:
+          - unique
+          - not_null
+      - name: period_sequence
+        description: 1 for the first period, +1 per month; period P-1 has period_sequence - 1.
+        data_tests:
+          - unique
+          - not_null
+      - name: prior_accounting_period
+        description: The previous period; null for the first.
+      - name: period_start_date
+        description: First day of the period.
+      - name: period_end_date
+        description: Last day of the period.
+      - name: days_in_period
+        description: Days in the period.
+      - name: close_date
+        description: The books close at the end of this day (4th business day of the next month).
+        data_tests:
+          - not_null
+      - name: fiscal_year
+        description: Fiscal year.
+      - name: fiscal_quarter
+        description: Fiscal quarter.
+      - name: is_closed_at_valuation
+        description: True when the period had closed by the end of the valuation date.
+      - name: is_valuation_period
+        description: True for the period containing the valuation date.
+      - name: is_after_valuation
+        description: True for periods that start after the valuation date (no data yet).
+
+  - name: dim_coverages
+    description: One row per coverage, from seeds/coverages.csv, plus its exposure unit.
+    columns:
+      - name: coverage_code
+        description: Primary key.
+        data_tests:
+          - unique
+          - not_null
+      - name: coverage_name
+        description: Coverage name.
+      - name: line_of_business
+        description: AUTO or HOME.
+        data_tests:
+          - accepted_values:
+              arguments:
+                values: ['AUTO', 'HOME']
+      - name: coverage_group
+        description: Grouping used in reports (liability, physical damage, property).
+      - name: annual_statement_line
+        description: The statutory annual statement line the coverage is reported on.
+      - name: annual_statement_line_name
+        description: Name of the annual statement line.
+      - name: is_liability
+        description: True for coverages that pay third parties.
+      - name: exposure_unit
+        description: VEHICLE for AUTO coverages, DWELLING for HOME.
+        data_tests:
+          - not_null
+
+  - name: dim_policyholders
+    description: One row per real policyholder (QA test customers excluded), with policy counts.
+    columns:
+      - name: policyholder_id
+        description: Primary key.
+        data_tests:
+          - unique
+          - not_null
+      - name: first_name
+        description: Given name.
+      - name: last_name
+        description: Family name.
+      - name: date_of_birth
+        description: Date of birth.
+      - name: email
+        description: Email address.
+        data_tests:
+          - dbt_utils.expression_is_true:
+              arguments:
+                expression: "not like '%@test.example.com'"
+      - name: address_state
+        description: Mailing address state.
+      - name: address_zip
+        description: Mailing address ZIP code.
+      - name: policy_count
+        description: Real policies held.
+      - name: auto_policy_count
+        description: AUTO policies held.
+      - name: home_policy_count
+        description: HOME policies held.
+      - name: has_auto_and_home
+        description: True when the customer holds both lines.
+      - name: first_policy_effective_date
+        description: Earliest original effective date across the customer's policies.
+      - name: created_at
+        description: When the record was created in the source.
+      - name: updated_at
+        description: Last change in the source.
+
+  - name: dim_policies
+    description: >
+      One row per real policy (QA test policies excluded) with its policyholder, its exposure
+      units (vehicles or the dwelling), its latest term and whether it is in force at the
+      valuation date. Contract enforced: other domains join to it.
+    config:
+      contract:
+        enforced: true
+    data_tests:
+      # Exposure units match the line: vehicles only on AUTO, a dwelling only on HOME.
+      - dbt_utils.expression_is_true:
+          arguments:
+            expression: >
+              (line_of_business = 'AUTO' and dwelling_count = 0)
+              or (line_of_business = 'HOME' and vehicle_count = 0)
+      # A homeowners policy insures exactly one dwelling.
+      - dbt_utils.expression_is_true:
+          arguments:
+            expression: "line_of_business <> 'HOME' or dwelling_count = 1"
+    columns:
+      - name: policy_id
+        description: Primary key.
+        data_type: bigint
+        constraints:
+          - type: not_null
+        data_tests:
+          - unique
+          - not_null
+          # Test policies are excluded from every mart.
+          - dbt_utils.accepted_range:
+              arguments:
+                max_value: 9000000
+                inclusive: false
+      - name: policy_number
+        description: Policy number.
+        data_type: varchar
+        data_tests:
+          - unique
+          - not_null
+      - name: line_of_business
+        description: AUTO or HOME.
+        data_type: varchar
+        data_tests:
+          - not_null
+          - accepted_values:
+              arguments:
+                values: ['AUTO', 'HOME']
+      - name: risk_state
+        description: State of the insured risk.
+        data_type: varchar
+      - name: sales_channel
+        description: ONLINE, PHONE or AGENCY.
+        data_type: varchar
+      - name: original_effective_date
+        description: Effective date of the first term.
+        data_type: date
+      - name: policy_status
+        description: Current status as the source keeps it (ACTIVE, CANCELLED, EXPIRED).
+        data_type: varchar
+      - name: is_in_force_at_valuation
+        description: In force at the valuation date by rule 3e (current state of the terms).
+        data_type: boolean
+        data_tests:
+          - not_null
+      - name: term_count
+        description: Number of terms.
+        data_type: bigint
+        data_tests:
+          - dbt_utils.accepted_range:
+              arguments:
+                min_value: 1
+      - name: latest_term_id
+        description: The policy's latest term (highest term_number).
+        data_type: bigint
+        data_tests:
+          - not_null
+          - relationships:
+              arguments:
+                to: ref('dim_policy_terms')
+                field: term_id
+      - name: latest_term_effective_date
+        description: Effective date of the latest term.
+        data_type: date
+      - name: latest_term_expiration_date
+        description: Exclusive expiration date of the latest term.
+        data_type: date
+      - name: latest_term_status
+        description: Status of the latest term.
+        data_type: varchar
+      - name: latest_cancellation_effective_date
+        description: Cancellation date of the latest term, if cancelled.
+        data_type: date
+      - name: latest_cancellation_reason
+        description: Cancellation reason of the latest term, if cancelled.
+        data_type: varchar
+      - name: policyholder_id
+        description: The policyholder.
+        data_type: bigint
+        data_tests:
+          - not_null
+          - relationships:
+              arguments:
+                to: ref('dim_policyholders')
+                field: policyholder_id
+      - name: policyholder_first_name
+        description: Policyholder given name.
+        data_type: varchar
+      - name: policyholder_last_name
+        description: Policyholder family name.
+        data_type: varchar
+      - name: policyholder_date_of_birth
+        description: Policyholder date of birth.
+        data_type: date
+      - name: policyholder_address_state
+        description: Policyholder mailing state (can differ from risk_state).
+        data_type: varchar
+      - name: policyholder_address_zip
+        description: Policyholder ZIP code.
+        data_type: varchar
+      - name: vehicle_count
+        description: Vehicles on the policy now (AUTO exposure units).
+        data_type: bigint
+      - name: dwelling_count
+        description: Dwellings on the policy now (HOME exposure units).
+        data_type: bigint
+      - name: dwelling_id
+        description: The insured dwelling (HOME only).
+        data_type: bigint
+      - name: dwelling_year_built
+        description: Year the dwelling was built.
+        data_type: integer
+      - name: dwelling_construction_type
+        description: FRAME, MASONRY or SUPERIOR.
+        data_type: varchar
+      - name: dwelling_square_feet
+        description: Living area.
+        data_type: integer
+      - name: dwelling_coverage_a_limit
+        description: Dwelling limit (coverage A).
+        data_type: decimal(12,2)
+      - name: created_at
+        description: When the policy was created.
+        data_type: timestamp
+      - name: updated_at
+        description: Last change in the source.
+        data_type: timestamp
+
+  - name: dim_policy_terms
+    description: >
+      One row per term of a real policy, with policy attributes, cancellation details and
+      the term's written premium rebuilt from its transactions.
+    data_tests:
+      - dbt_utils.unique_combination_of_columns:
+          arguments:
+            combination_of_columns: ['policy_id', 'term_number']
+      # The source keeps a running total of the term's premium; it should equal the sum of
+      # the term's transactions.
+      - dbt_utils.expression_is_true:
+          arguments:
+            expression: "term_written_premium = transaction_written_premium"
+    columns:
+      - name: term_id
+        description: Primary key.
+        data_tests:
+          - unique
+          - not_null
+      - name: policy_id
+        description: The policy.
+        data_tests:
+          - not_null
+          - relationships:
+              arguments:
+                to: ref('dim_policies')
+                field: policy_id
+      - name: policy_number
+        description: Policy number.
+      - name: policyholder_id
+        description: The policyholder.
+      - name: line_of_business
+        description: AUTO or HOME.
+      - name: risk_state
+        description: State of the insured risk.
+      - name: term_number
+        description: 1 for new business, then 2, 3, ... per renewal.
+      - name: is_renewal
+        description: True for terms after the first.
+      - name: term_effective_date
+        description: First covered day.
+      - name: term_expiration_date
+        description: Exclusive end of the term.
+      - name: term_days
+        description: Days in the term.
+        data_tests:
+          - not_null
+      - name: billing_plan
+        description: PAY_IN_FULL or MONTHLY.
+      - name: term_status
+        description: Current status (ACTIVE, EXPIRED, CANCELLED).
+      - name: cancellation_effective_date
+        description: Null unless cancelled.
+      - name: cancellation_reason
+        description: Null unless cancelled.
+      - name: is_cancelled
+        description: True when the term is cancelled in its current state.
+      - name: is_flat_cancellation
+        description: True when cancelled on its first day (no coverage, full premium returned).
+      - name: coverage_end_date
+        description: Exclusive end of coverage, the cancellation date or the expiration date.
+      - name: covered_days
+        description: Days of coverage actually provided.
+      - name: is_expired_at_valuation
+        description: True when the term's last covered day is on or before the valuation date.
+      - name: term_written_premium
+        description: The source's running total of the term's written premium.
+      - name: transaction_written_premium
+        description: Sum of the term's transaction lines.
+      - name: transaction_count
+        description: Number of transactions on the term.
+      - name: created_at
+        description: When the term was created.
+      - name: updated_at
+        description: Last change in the source.

@@ -1,0 +1,269 @@
+version: 2
+
+models:
+  - name: fct_policy_transaction_lines
+    description: >
+      Every premium transaction line of a real policy (QA test policies excluded), with the
+      accounting period it is booked in and its earning window. Written premium of a period is
+      the sum of written_premium by accounting_period.
+    columns:
+      - name: transaction_line_id
+        description: Primary key.
+        data_tests:
+          - unique
+          - not_null
+      - name: transaction_id
+        description: The transaction header.
+        data_tests:
+          - not_null
+      - name: policy_id
+        description: The policy.
+        data_tests:
+          - not_null
+          - relationships:
+              arguments:
+                to: ref('dim_policies')
+                field: policy_id
+      - name: term_id
+        description: The term.
+        data_tests:
+          - not_null
+          - relationships:
+              arguments:
+                to: ref('dim_policy_terms')
+                field: term_id
+      - name: policyholder_id
+        description: The policyholder.
+        data_tests:
+          - relationships:
+              arguments:
+                to: ref('dim_policyholders')
+                field: policyholder_id
+      - name: policy_number
+        description: Policy number.
+      - name: line_of_business
+        description: AUTO or HOME.
+        data_tests:
+          - accepted_values:
+              arguments:
+                values: ['AUTO', 'HOME']
+      - name: risk_state
+        description: State of the insured risk.
+      - name: coverage_code
+        description: Coverage.
+        data_tests:
+          - not_null
+          - relationships:
+              arguments:
+                to: ref('dim_coverages')
+                field: coverage_code
+      - name: transaction_type
+        description: NEW_BUSINESS, RENEWAL, ENDORSEMENT, CANCELLATION or REINSTATEMENT.
+        data_tests:
+          - accepted_values:
+              arguments:
+                values: ['NEW_BUSINESS', 'RENEWAL', 'ENDORSEMENT', 'CANCELLATION', 'REINSTATEMENT']
+      - name: transaction_date
+        description: The date the transaction is dated.
+      - name: effective_date
+        description: When the change takes effect on coverage.
+      - name: transaction_created_at
+        description: When the transaction was entered.
+      - name: accounting_period
+        description: The booked accounting period (booking rule, docs/source-systems.md 3c).
+        data_tests:
+          - not_null
+          - relationships:
+              arguments:
+                to: ref('dim_accounting_periods')
+                field: accounting_period
+      - name: transaction_date_period
+        description: Calendar period of transaction_date.
+      - name: is_booked_after_close
+        description: True when entered after its own month closed (LATE_ENTERED_TRANSACTIONS).
+      - name: is_backdated
+        description: True when effective before it is dated (BACKDATED_ENDORSEMENTS).
+      - name: term_number
+        description: Term number within the policy.
+      - name: term_effective_date
+        description: First covered day of the term.
+      - name: term_expiration_date
+        description: Exclusive end of the term.
+      - name: term_days
+        description: Days in the term.
+      - name: coverage_start_date
+        description: First day of the line's earning window.
+      - name: coverage_end_date
+        description: Exclusive end of the line's earning window.
+      - name: window_days
+        description: Days in the earning window.
+      - name: written_premium
+        description: Signed written premium of the line.
+        data_tests:
+          - not_null
+
+  - name: fct_premium_by_policy_period
+    description: >
+      The premium subledger: written, earned and unearned premium per policy, coverage and
+      accounting period, from the period of the first booked line to the end of the last
+      earning window (capped at the valuation period). Missing rows are zero. Summed over
+      policies: UPR(P) = UPR(P-1) + written(P) - earned(P). Contract enforced: accounting
+      reports build on it.
+    config:
+      contract:
+        enforced: true
+    data_tests:
+      - dbt_utils.unique_combination_of_columns:
+          arguments:
+            combination_of_columns: ['policy_id', 'coverage_code', 'accounting_period']
+    columns:
+      - name: policy_coverage_period_key
+        description: Surrogate key of policy_id, coverage_code and accounting_period.
+        data_type: varchar
+        constraints:
+          - type: not_null
+        data_tests:
+          - unique
+          - not_null
+      - name: policy_id
+        description: The policy.
+        data_type: bigint
+        constraints:
+          - type: not_null
+        data_tests:
+          - relationships:
+              arguments:
+                to: ref('dim_policies')
+                field: policy_id
+      - name: policy_number
+        description: Policy number.
+        data_type: varchar
+      - name: coverage_code
+        description: Coverage.
+        data_type: varchar
+        constraints:
+          - type: not_null
+        data_tests:
+          - relationships:
+              arguments:
+                to: ref('dim_coverages')
+                field: coverage_code
+      - name: accounting_period
+        description: Accounting period ('YYYY-MM').
+        data_type: varchar
+        constraints:
+          - type: not_null
+        data_tests:
+          - relationships:
+              arguments:
+                to: ref('dim_accounting_periods')
+                field: accounting_period
+      - name: line_of_business
+        description: AUTO or HOME.
+        data_type: varchar
+        data_tests:
+          - not_null
+          - accepted_values:
+              arguments:
+                values: ['AUTO', 'HOME']
+      - name: risk_state
+        description: State of the insured risk.
+        data_type: varchar
+      - name: written_premium
+        description: Written premium booked in the period.
+        data_type: decimal(18,2)
+        data_tests:
+          - not_null
+      - name: earned_premium
+        description: Premium earned in the period (difference of inception-to-date earned).
+        data_type: decimal(18,2)
+        data_tests:
+          - not_null
+      - name: unearned_premium_end
+        description: Unearned premium reserve at the period end.
+        data_type: decimal(18,2)
+        data_tests:
+          - not_null
+
+  - name: fct_policy_month_end
+    description: >
+      One row per real policy and accounting period in which the policy had coverage on at
+      least one day, through the valuation period: in force at the period end (rule 3e),
+      premium in force, exposure units and earned exposure in exposure-years.
+    data_tests:
+      - dbt_utils.unique_combination_of_columns:
+          arguments:
+            combination_of_columns: ['policy_id', 'accounting_period']
+      # A policy is either in force with a term, or not in force without one.
+      - dbt_utils.expression_is_true:
+          arguments:
+            expression: "is_in_force = (in_force_term_id is not null)"
+    columns:
+      - name: policy_period_key
+        description: Surrogate key of policy_id and accounting_period.
+        data_tests:
+          - unique
+          - not_null
+      - name: policy_id
+        description: The policy.
+        data_tests:
+          - not_null
+          - relationships:
+              arguments:
+                to: ref('dim_policies')
+                field: policy_id
+      - name: policy_number
+        description: Policy number.
+      - name: line_of_business
+        description: AUTO or HOME.
+        data_tests:
+          - accepted_values:
+              arguments:
+                values: ['AUTO', 'HOME']
+      - name: risk_state
+        description: State of the insured risk.
+      - name: accounting_period
+        description: Accounting period.
+        data_tests:
+          - not_null
+          - relationships:
+              arguments:
+                to: ref('dim_accounting_periods')
+                field: accounting_period
+      - name: period_end_date
+        description: Last day of the period; in-force status is measured at its end.
+      - name: is_in_force
+        description: In force at the period end (docs/source-systems.md 3e), from the current state of the terms.
+        data_tests:
+          - not_null
+      - name: in_force_term_id
+        description: The term in force at the period end; null when not in force.
+        data_tests:
+          - relationships:
+              arguments:
+                to: ref('dim_policy_terms')
+                field: term_id
+      - name: in_force_term_premium
+        description: >
+          Written premium of the in-force term from transactions effective by the period end;
+          0 when not in force.
+      - name: annualized_in_force_premium
+        description: >
+          In-force premium at an annual rate: each line's premium per day of its window, times
+          365. Mid-term changes count at their full rate, not pro rata.
+      - name: exposure_units
+        description: Vehicles (AUTO) or dwellings (HOME) on the policy at the period end.
+        data_tests:
+          - not_null
+      - name: in_force_exposure_units
+        description: exposure_units when in force at the period end, else 0.
+      - name: covered_days
+        description: Days of the period with coverage.
+        data_tests:
+          - not_null
+          - dbt_utils.accepted_range:
+              arguments:
+                min_value: 1
+                max_value: 31
+      - name: earned_exposure_years
+        description: covered_days x exposure_units / 365, the denominator for claim frequency.

@@ -185,3 +185,162 @@ models:
         description: When the term was created.
       - name: updated_at
         description: Last change in the source.
+
+  - name: stg_policy_admin__policy_transactions
+    description: >
+      Premium transaction headers, one row per transaction_id. Soft-deleted rows are removed;
+      transactions of QA test policies are kept and flagged.
+    columns:
+      - name: transaction_id
+        description: Primary key.
+        data_tests:
+          - unique
+          - not_null
+      - name: policy_id
+        description: The policy.
+        data_tests:
+          - not_null
+          - relationships:
+              arguments:
+                to: ref('stg_policy_admin__policies')
+                field: policy_id
+      - name: term_id
+        description: The term the transaction belongs to.
+        data_tests:
+          - not_null
+          - relationships:
+              arguments:
+                to: ref('stg_policy_admin__policy_terms')
+                field: term_id
+      - name: transaction_type
+        description: NEW_BUSINESS, RENEWAL, ENDORSEMENT, CANCELLATION or REINSTATEMENT.
+        data_tests:
+          - not_null
+          - accepted_values:
+              arguments:
+                values: ['NEW_BUSINESS', 'RENEWAL', 'ENDORSEMENT', 'CANCELLATION', 'REINSTATEMENT']
+      - name: transaction_date
+        description: The date the transaction is dated; with created_at it decides the booked period.
+        data_tests:
+          - not_null
+      - name: effective_date
+        description: When the change takes effect on coverage; earning starts here.
+        data_tests:
+          - not_null
+      - name: written_premium
+        description: Signed written premium of the transaction; equals the sum of its lines.
+        data_tests:
+          - not_null
+      - name: is_backdated
+        description: True when effective_date is before transaction_date.
+      - name: is_test_policy
+        description: True for transactions of QA test policies.
+        data_tests:
+          - not_null
+      - name: created_at
+        description: When the transaction was entered into the system.
+        data_tests:
+          - not_null
+
+  - name: stg_policy_admin__policy_transaction_lines
+    description: >
+      Coverage lines of premium transactions, one row per transaction_line_id. No test flag:
+      the line has no policy_id, so the flag comes from the header downstream.
+    data_tests:
+      - dbt_utils.unique_combination_of_columns:
+          arguments:
+            combination_of_columns: ['transaction_id', 'coverage_code']
+    columns:
+      - name: transaction_line_id
+        description: Primary key.
+        data_tests:
+          - unique
+          - not_null
+      - name: transaction_id
+        description: The transaction header.
+        data_tests:
+          - not_null
+          - relationships:
+              arguments:
+                to: ref('stg_policy_admin__policy_transactions')
+                field: transaction_id
+      - name: coverage_code
+        description: Coverage, see seeds/coverages.csv.
+        data_tests:
+          - not_null
+          - relationships:
+              arguments:
+                to: ref('coverages')
+                field: coverage_code
+      - name: written_premium
+        description: Signed written premium of this coverage line.
+        data_tests:
+          - not_null
+
+  - name: stg_policy_admin__vehicles
+    description: Insured vehicles, one row per vehicle_id; the AUTO exposure unit.
+    columns:
+      - name: vehicle_id
+        description: Primary key.
+        data_tests:
+          - unique
+          - not_null
+      - name: policy_id
+        description: The AUTO policy insuring the vehicle.
+        data_tests:
+          - not_null
+          - relationships:
+              arguments:
+                to: ref('stg_policy_admin__policies')
+                field: policy_id
+      - name: model_year
+        description: Model year.
+      - name: make
+        description: Manufacturer.
+      - name: body_type
+        description: SEDAN, SUV, PICKUP, MINIVAN or COUPE.
+        data_tests:
+          - accepted_values:
+              arguments:
+                values: ['SEDAN', 'SUV', 'PICKUP', 'MINIVAN', 'COUPE']
+      - name: is_test_policy
+        description: True for vehicles on QA test policies.
+        data_tests:
+          - not_null
+      - name: created_at
+        description: When the vehicle was added to the policy.
+
+  - name: stg_policy_admin__dwellings
+    description: Insured dwellings, one row per dwelling_id; the HOME exposure unit.
+    columns:
+      - name: dwelling_id
+        description: Primary key.
+        data_tests:
+          - unique
+          - not_null
+      - name: policy_id
+        description: The HOME policy insuring the dwelling.
+        data_tests:
+          - not_null
+          - relationships:
+              arguments:
+                to: ref('stg_policy_admin__policies')
+                field: policy_id
+      - name: year_built
+        description: Year of construction.
+      - name: construction_type
+        description: FRAME, MASONRY or SUPERIOR.
+        data_tests:
+          - accepted_values:
+              arguments:
+                values: ['FRAME', 'MASONRY', 'SUPERIOR']
+      - name: square_feet
+        description: Living area in square feet.
+      - name: coverage_a_limit
+        description: Dwelling limit (coverage A), in dollars.
+      - name: is_test_policy
+        description: True for dwellings on QA test policies.
+        data_tests:
+          - not_null
+      - name: created_at
+        description: When the dwelling was added to the policy.
