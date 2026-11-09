@@ -183,18 +183,37 @@ billed-and-due part (due installments minus cash) and the not-yet-due part (inst
 scheduled later).
 
 The aging needs to know which installments are still unpaid, but billing never links a payment
-to an installment. `int_accounting__installment_allocation` builds that link in three steps:
+to an installment. `int_accounting__installment_allocation` builds that link in four steps:
 
-1. Refunds use up credits. A credit installment (cancellation return premium, a credit
-   endorsement) lowers what the customer owes, unless billing paid it out as a refund; a
-   refunded credit is settled and must not lower anything else. Only refunds beyond the
-   credits reduce the cash.
-2. The remaining credits settle the latest installments first, because a cancellation removes
-   the end of the coverage.
-3. The policy's cash settles the oldest installments first (first in, first out).
+1. A reinstatement cancels its cancellation. Billing bills the cancellation's return premium
+   as a credit and the reinstatement as a debit of the same amount; the two offset each other
+   without cash (source-systems.md 3b). So the reinstatement debit is settled by the
+   cancellation credit of the same term, and that credit is used up.
+2. Refunds use up the credits that are left. A credit installment (a cancellation that was not
+   reversed, a credit endorsement) lowers what the customer owes, unless billing paid it out as
+   a refund; a refunded credit is settled and must not lower anything else. Only refunds beyond
+   the credits reduce the cash.
+3. The remaining credits settle the latest installments of their own term first, because a
+   cancellation removes the end of that term's coverage. Only a credit larger than everything
+   its term billed would go on to the rest of the policy.
+4. The policy's cash settles the oldest installments first (first in, first out).
 
 What is left open is aged by days past due. Over 90 days matters beyond collections: statutory
 accounting does not count such premium as an asset.
+
+Why step 1 and "own term first" matter. A first version pooled all credits per policy and
+treated a reinstatement debit like any other charge. A reinstated customer who then paid every
+installment on time (policy 16789, home: missed one installment in 2025-09, cancelled,
+reinstated, paid on schedule ever since) showed all of the 1,515.40 it owes as past due, most of
+it over 90 days: the cancellation credit had settled the renewal's installments, not yet due,
+and the reinstatement debit had used up cash that paid real installments. Total open did not
+change, so the tests that tie the aging to the receivable and the ledger could not see it.
+`assert_aging_shows_nothing_past_due_for_paid_up_policies.sql` now checks the buckets
+themselves: it finds, from billing directly, the policies that have paid everything due and
+have no credit left to allocate, and requires that none of them shows money past due. On the
+default load the fix lowered total past due from 176,638.86 to 131,111.01, and the policies
+with a reinstatement showing anything past due from 82 to 7 (each of those 7 has a genuinely
+unpaid installment).
 
 ## 6. A worked example
 

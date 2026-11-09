@@ -3,8 +3,9 @@
 -- How to read a row: receivable_amount is what the policyholder owes in total (premium written
 -- and billed, minus cash collected). It is split by how long the open installments have been
 -- past their due date, after settling installments with credits and cash as explained in
--- int_accounting__installment_allocation (credits not refunded settle the latest-due
--- installments first, cash the oldest-due first):
+-- int_accounting__installment_allocation (a reinstatement is settled by the cancellation it
+-- reverses; credits not refunded settle the latest-due installments of their own term first;
+-- cash settles the oldest-due first):
 --   current_amount               not past due: due on the valuation date or later. Includes
 --                                not_yet_due_amount, installments scheduled after it
 --   past_due_1_30_amount ...     open installments 1-30, 31-60, 61-90, over 90 days past due
