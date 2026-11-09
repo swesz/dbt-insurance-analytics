@@ -1,129 +1,130 @@
 # Project state (handover)
 
-Written 2026-11-08 when the first build session handed over. Rewrite or delete this file before
-the repo becomes public.
+Second handover, written 2026-11-08 when the verification and review session stopped at its
+context limit. Rewrite or delete this file before the repo becomes public.
 
-## Done and committed
-- Scaffold: Python 3.14, dbt-core 1.12.6, dbt-duckdb 1.11.1, DuckDB 2.0.0, dbt_utils 1.4.1.
-- Contract and rules: `loader/raw_schema.sql`, `docs/source-systems.md`, `docs/data-issues.md`,
-  `docs/architecture.md` (model inventory and who owned what), `docs/decisions.md` (D-001..D-007).
-- Seeds, `generate_schema_name`, `booked_accounting_period` (checked on 4 cases), `cents_to_dollars`.
-- `scripts/check_public_safety.py` (checked with a positive control: it caught a local path, a
-  private email, a blocklisted string and a non-noreply identity) and `.github/workflows/ci.yml`.
-- `docs/insurance-glossary.md`; `README.md` draft (the `<!-- RESULTS -->` marker still needs
-  verified numbers).
-- Premium and claims models, tests and guides: committed by their agents, but validated only
-  against an empty raw database so far.
+## Verified in this session [V]
+- History: the blocklisted term was removed from every commit with `git filter-repo
+  --replace-text` (5 literal swaps that reproduce the wording HEAD already had). An independent
+  script checked the rewrite: 43 commits, identical authors, dates and messages, HEAD tree
+  byte-identical, only the 5 affected files changed. The public-safety scan over the full history
+  reports 0 errors. The pre-rewrite history is kept as a single-file git backup in `~/backups/`
+  (outside the repo; restore with `git clone <file>`). The in-repo backup branch the owner asked
+  for was deleted after that file was verified, because the scanner reads every ref and would
+  always fail on it, and because `git push --all` would publish it.
+- From scratch, before the review fixes: `uv sync`, `pytest` (18 passed), generator, loader,
+  `dbt build` (dev) and `dbt build --target prod`: each 786 pass, 2 warn, 0 error. The warns are
+  the planted LOSS_OUTSIDE_TERM (13) and ORPHAN_CLAIMS (5). The generator writes byte-identical
+  files on two runs. `dbt docs generate` works. The simulation (21 closes, 202 s) reproduced the
+  snapshot history exactly (32,557 terms, 861 policyholders, 257 payments with history).
+- Independent checks against raw, in SQL written separately from the models: all-time written
+  premium equals the mart to the cent; earned + unearned - written = 0.00; GL reconciliation
+  1,344 rows, 1,338 MATCHED, 6 EXPLAINED, 0 UNEXPLAINED; PIF as reported at the 2025-06 close and
+  restated (6,522 / 6,524 AUTO) recounted from an as-of load by rule 3e.
+- The earlier "32 of 42" as-reported rows was wrong: 26 rows differ (27 have any restatement).
+- CI: `astral-sh/setup-uv@v10` did not exist (setup-uv publishes no moving major tag); pinned to
+  `v10.3.3`. `actions/checkout@v7` and `actions/upload-artifact@v7` exist. `uv lock --check` ok.
 
-## In flight at handover
-Five background agents were still running. Each commits its own work; their final reports went
-to the old session, so judge their results from `git log` and by rerunning everything.
+## Changes committed this session
+- Spec: the generator's deviations from the targets (source-systems.md 4a), each checked.
+- Guard test `tests/generator_audit/assert_control_totals_cover_the_valuation_load.sql`: the
+  control-total tests skip comparing when as_of differs, so a drifted default load would have
+  made them all pass. Positive control: fails with as_of off by 1 second.
+- README results section, filled with verified numbers (some need updating, see below).
+- Three independent reviewers (premium, claims, accounting/actuarial) compared the SQL with the
+  spec. Premium fixes (D-017 in-force premium, D-018 exact control totals, an overlap test, doc
+  fixes) and claims fixes (D-019 chain ladder from the valuation date, D-020 null
+  is_loss_outside_term, tests that could not fail removed or replaced, planted counts counted the
+  generator's way) are merged into main. Each fix was checked against an independent query.
 
-| Agent | Owns | Finishes when |
-|---|---|---|
-| generator (done) | `generator/`, `loader/` (not `raw_schema.sql`), exact counts in `docs/data-issues.md` | done: `warehouse/RAW_READY` exists |
-| premium (done) | `models/staging/policy_admin`, `intermediate/premium`, `marts/premium`, policy dims in `marts/core`, `tests/premium`, `docs/guide-premium.md` | validated against real data |
-| claims (done) | `models/staging/claims`, `intermediate/claims`, `marts/claims`, claim dims, the triangle, `analyses/`, `tests/claims`, `docs/guide-claims.md` | same |
-| accounting (done) | `models/staging/billing`, `staging/general_ledger`, `intermediate/accounting`, `marts/accounting`, `tests/accounting`, `seeds/gl_reconciling_items.csv`, `docs/guide-accounting.md` | reconciliation has no unexplained differences |
-| actuarial + snapshots (done) | `marts/actuarial` (not the triangle), `snapshots/`, `models/exposures.yml`, `tests/actuarial`, `scripts/simulate_month_end_closes.py`, `docs/guide-snapshots-and-actuarial.md` | simulation shows real snapshot history |
-
-## Generator results (from its final report; not yet rechecked by anyone else)
-- Done: `warehouse/raw.duckdb` loaded at the default as-of, `warehouse/RAW_READY` created.
-  Generator 13 s, loader 4 s at scale 1.0. `pytest`: 18 passed. Two runs gave identical data.
-- Volume (seed 42): 24,316 policies, 68,558 terms, 290,285 transaction lines, 352,980
-  installments, 299,262 payments, 4,477 claims (8,597 CDC rows), 44,206 claim transactions,
-  1,822 GL lines. PIF at 2026-09: 8,784 auto and 6,460 home.
-- Exact planted counts are in `docs/data-issues.md` and `raw.generator_audit.planted_issues`.
-- Deviations from `docs/source-systems.md`, to document there:
-  - home premium is about $1,270–1,720 a year, not $1,800, so the home loss ratio lands in range;
-  - renewals are written 30 days before the term starts;
-  - every control total excludes test policies;
-  - orphan claims have no financial transactions;
-  - the 2025-08 timing issue moves payments only, not their reserve erosion;
-  - voided payments are reissued as a new payment.
-- Accepted: auto accident-year loss ratio of 87% in 2023 (BI claim-count noise, +2.6σ) and 58% in
-  2025 (immature), against the 60–75% target. Home excluding catastrophes is 52–65% in every year.
-- The generator's expected reconciling items are in
-  `data/generated/gl_reconciling_items_expected.csv`. Do not copy them into the seed: the
-  accounting agent documents what its reconciliation finds, and the expected file is used
-  afterwards only to check that.
-
-## Premium results (from its final report)
-- Its slice builds 218 nodes, all passing. Written, earned, unearned and PIF control totals
-  match the generator to the cent in all 114 period × LOB rows, and an independent Python
-  re-implementation agrees with both for the periods it checked.
-- Fixed during validation: month-end rows with 0 covered days on flat-cancelled terms, and
-  0 exposure units for policies keyed in late.
-- Own definitions, to review: `in_force_term_premium` and `annualized_in_force_premium`.
-- Run its slice with `--indirect-selection=cautious`, so tests from other domains don't run in a
-  partial dev file.
-
-## Claims results (from its final report)
-- Its slice builds 316 nodes: 314 pass and 2 warn, the planted LOSS_OUTSIDE_TERM (13) and
-  ORPHAN_CLAIMS (5) at their exact counts. Period and accident-year control totals match the
-  generator to the cent, and every planted count matches.
-- Incremental check: full refresh and incremental runs give identical results; a 3-day lookback
-  restored deleted late rows.
-- To review: `is_loss_outside_term` is null for the orphans. Warn tests use
-  `severity: error` with `warn_if`/`error_if`, because with `severity: warn` dbt never applies
-  `error_if`.
-
-## Actuarial and snapshot results (from its final report)
-- Its 100 nodes pass. The simulation ran 2025-01..2026-09 in 201 s: 32,557 terms, 861
-  policyholders and 257 payments have more than one snapshot version.
-- As-reported PIF differs from restated in 32 of 42 period × LOB rows (late new business, late
-  cancellations, reinstatements). A raw load as of the 2025-06 close counts AUTO 6,337 and
-  HOME 4,460, equal to the model's as-reported figures.
-- A full-project build in its dev file showed 3 accounting test errors while the accounting agent
-  was still working: recheck once accounting reports.
-- After any regeneration, rerun the simulation with `--fresh`.
-
-## Accounting results (from its final report), and status after all five agents
-- Full project build, run by the accounting agent: 786 pass, 2 warn (the planted claims
-  defects), 0 error. The reconciliation has 1,344 rows: 1,338 MATCHED and 6 EXPLAINED, which are
-  the planted 2024-06 reclass and the 2025-08/09 timing item.
-- The agent's 6 reconciling items equal the generator's expected list exactly [V, coordinator].
-- Fixed upstream: `cents_to_dollars` returned DOUBLE, and now returns DECIMAL.
-- All five agents finished. No agent is running any more.
-- Wording: the generator used a term from the external blocklist for home policies bought by
-  auto customers. It is renamed in the current files, but earlier commits still contain it, so
-  the public-safety scan fails on history until the history is rewritten or squashed before the
-  first push. Owner's choice (2026-11-08): rewrite only the affected files in every commit,
-  keeping commits and messages, after creating a backup branch; then rerun the scan.
+## In flight: accounting fixes (branch `worktree-agent-aa978e88b094c9a17`)
+A fixer agent works in the worktree `.claude/worktrees/agent-aa978e88b094c9a17`, branched from
+c864e48, and commits there. It was told not to touch README, STATE, decisions, data-issues,
+source-systems, CLAUDE.md or .github, and to report the text it wants there. Its brief, with the
+decision already made for each:
+1. Bug: receivable aging puts a reinstated term's cancellation credit on later installments and
+   lets the reinstatement debit absorb cash, so 82 current policies show 46,182.39 past due.
+   Fix: net cancellation and reinstatement per term, apply credits within their own term first.
+   Amends D-016.
+2. Remove rollforward and aging checks that are true by construction; keep GL and control-total
+   comparisons.
+3. Add `source_system` to the reconciliation grain and to `seeds/gl_reconciling_items.csv`.
+4. `claim_frequency` counts claims, not claimants (glossary and spec).
+5. Docs: calendar incurred ties to 5000 + 5050 + 5100.
+6. 2026-09 is not closed at the valuation date, so it gets no as-reported PIF.
+7. Reconciliation tolerance 0, not 0.01 (amends D-015).
+8. Rename aging's `not_yet_due_amount` (it means something else in the receivable model).
+9. Document the close-boundary assumption of the as-reported join.
+10. Document two latent items: expense recoveries all go to 5050; a skipped close is not
+    always detected by the simulation.
+If its report was lost with the old session, read its commits (`git log main..<branch>`).
 
 ## Next steps, in order
-1. Confirm every agent has finished: `warehouse/RAW_READY` exists, the commits have stopped,
-   and no `python` or `dbt` processes are left running.
-2. Verify from scratch: `uv sync`, `pytest`, `python -m generator`, `python -m loader`,
-   `dbt deps`, `dbt build`, and `dbt build --target prod`. Every test must pass or be a documented
-   warn. The control-total tests, the GL reconciliation (no UNEXPLAINED rows) and the
-   rollforwards must pass.
-3. Delete the per-agent leftovers, which are all gitignored: `warehouse/dev_*.duckdb`,
-   `raw_empty.duckdb`, `raw_sim.duckdb`, `target_*/` and `logs_*/`.
-4. Have someone not anchored on the build review the SQL against `docs/source-systems.md`. The
-   earning and claim-event models were reviewed once and looked right.
-5. README: fill in the results with verified numbers and check that every link resolves.
-6. Run `python scripts/check_public_safety.py` (its blocklist is outside the repo).
-7. Push: gh 2.103.3 is installed but not logged in. The owner runs `gh auth login`, then
-   `gh repo create swesz/dbt-insurance-analytics --private --source . --push`. The repo becomes
-   public only after the owner has reviewed it on GitHub.
+1. Accounting branch: review its commits, then `git merge --no-ff` it. Record its decisions as
+   D-021 (reconciliation grain) and D-022 (frequency basis), and amend D-015 and D-016 (then
+   accepted, not proposed). Update data-issues.md where it names a "rollforward test" as a check
+   (BACKDATED_ENDORSEMENTS): the control totals catch that, not the rollforward.
+2. Remove the worktrees and their branches: `git worktree remove .claude/worktrees/<name>` and
+   `git branch -D worktree-agent-<id>` for both agents (claims: aa12b1be805086b06, merged).
+   The scanner reads every branch.
+3. Verify from scratch again on the merged code: generator, loader, `dbt build`, `dbt build
+   --target prod`, then the simulation into separate files (`--raw-path
+   warehouse/raw_sim.duckdb --dev-path warehouse/dev_sim.duckdb --fresh`) and a build on them.
+4. README: recount the nodes ("792 nodes" is stale: the claims branch alone gives 795 total);
+   update the reconciliation rows (new grain), the as-reported row (2026-09 drops out of the
+   42), and the bodily injury frequency sentence (the 1.6 per 100 figure counted claimants). Replace
+   the last loss-ratio sentence with: "The chain-ladder analysis in `analyses/` projects 2025 to
+   ultimate (auto 63%, home 79%) and leaves 2026 unprojected, because that accident year is not
+   over (docs/guide-claims.md section 8)." Recheck the guide numbers the claims agent flagged in
+   guide-snapshots-and-actuarial.md section 7 if earned premium changed.
+5. Delete leftovers (all gitignored): `warehouse/dev_sim.duckdb`, `raw_sim.duckdb`,
+   `target_sim/`, `logs_sim/`, and any `dev_fix_*` or `target_*` from the agents.
+6. `python scripts/check_public_safety.py` must report 0 errors.
+7. Push (see GitHub below). Then check that the first CI run passes.
+
+## GitHub CLI
+gh 2.103.3 is installed in `C:\Program Files\GitHub CLI\` and that folder is on the machine
+PATH, but VS Code was started before the install, so its terminals still have the old PATH.
+Fix: quit VS Code completely (every window) and start it again, or in a running PowerShell
+terminal run
+`$env:Path = [Environment]::GetEnvironmentVariable('Path','Machine') + ';' + [Environment]::GetEnvironmentVariable('Path','User')`.
+Then the owner runs `gh auth login` (browser flow). Push only main, explicitly:
+`gh repo create swesz/dbt-insurance-analytics --private --source . --remote origin`, then
+`git push -u origin main`. (`--push` would push "local commits" without naming the refs.)
+
+## Open items from the reviews (not fixed, low risk)
+- Premium: `coverage_start_date` / `coverage_end_date` mean the earning window in the line
+  models but the coverage period in `dim_policy_terms`; `valuation_date` is a fixed var, not
+  read from `load_info`; the data has no cancellation or reinstatement booked after a close;
+  date columns `date_day` and `date_of_birth` break the `_date` naming rule.
+- Claims: the generator checks a catastrophe loss against the term only at the event start;
+  roughly one seed in 5-8 could fail the planted-count test [E]. Not seen at seed 42.
+- CLAUDE.md says known defects are tested "with `severity: warn` and thresholds", but with
+  `severity: warn` dbt never applies `error_if`; the code correctly uses `severity: error` with
+  `warn_if`/`error_if`. Owner to decide on the wording (Q-004).
+- README: the BigQuery sandbox's DML restriction is confirmed only by Google's 2019 launch post;
+  the current sandbox page could not be fetched in this session (Q-005).
 
 ## Owner decisions (2026-11-08)
 DuckDB only, newest versions. Three databases: raw, dev, prod. Generated data with planted
 issues at realistic volume. Repo name `dbt-insurance-analytics`. Keep the Co-Authored-By
 trailers and a README paragraph on how the project was built. GitHub CLI only. Private first.
 
-## Questions answered by the owner
+## Questions
 - Q-001: The README paragraph "How this was built" speaks in the owner's voice. Answer
   (2026-11-08): keep it for now; the owner reviews it with the rest before going public.
 - Q-002: License. Answer (2026-11-08): MIT, copyright under the GitHub handle (`LICENSE`).
 - Q-003: Other public repos on the profile. Answer (2026-11-08): make `test01_employee_api` and
   `test02_hr_ext-api` private before the link goes out; the machine-learning repo stays public.
-  This needs `gh auth login` first, then
+  After `gh auth login`:
   `gh repo edit swesz/<repo> --visibility private --accept-visibility-change-consequences`
   for each of the two, or the owner does it in the GitHub settings.
+- Q-004: CLAUDE.md wording on warn tests (above). Open.
+- Q-005: Verify the sandbox's DML limit on the current page before going public. Open.
 
 ## Working pattern for parallel jobs
 Give each job its own files: `DBT_DUCKDB_DEV_PATH=warehouse/dev_<name>.duckdb`,
 `DBT_TARGET_PATH=target_<name>`, `DBT_LOG_PATH=logs_<name>`, and, when it needs different raw
-data, `DBT_DUCKDB_RAW_PATH`. Local-only rules are in `CLAUDE.local.md` (gitignored).
+data, `DBT_DUCKDB_RAW_PATH`. Or give an agent its own git worktree (it must generate its own
+data there) and merge its branch. When editing files with Python on Windows, pass
+`newline="\n"` to `write_text`. Local-only rules are in `CLAUDE.local.md` (gitignored).
