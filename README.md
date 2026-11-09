@@ -133,8 +133,11 @@ staging views read from it:
 duckdb warehouse/dev.duckdb "ATTACH 'warehouse/raw.duckdb' AS raw (READ_ONLY); select * from accounting.rpt_unearned_premium_rollforward order by accounting_period desc limit 12"
 ```
 
-Optional: `python scripts/simulate_month_end_closes.py --start 2025-01 --end 2026-09` replays
-month-end closes and snapshots after each one, so the snapshots hold real history.
+Optional: `python scripts/simulate_month_end_closes.py --start 2025-01 --end 2026-09 --fresh`
+replays month-end closes and snapshots after each one, so the snapshots hold real history. The
+history exists only in the database the script writes, `warehouse/dev.duckdb` by default: a
+plain `dbt build` runs the snapshots once and records no past. To give prod the history, add
+`--dev-path warehouse/prod.duckdb`, then run `dbt build --target prod`.
 
 ## How the results are checked
 

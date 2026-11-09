@@ -112,7 +112,8 @@ The exact counts are computed after generation (`defects.count_planted`), writte
 `planted_issues.parquet` and loaded into `raw.generator_audit.planted_issues`. The tests count
 every one of them again with SQL on the loaded data. `data/generated/gl_reconciling_items_expected.csv`
 lists the GL-minus-subledger differences (debit minus credit) that the manual reclass and the
-claims interface timing issue create, in the layout of `seeds/gl_reconciling_items.csv`.
+claims interface timing issue create, in the layout of `seeds/gl_reconciling_items.csv` without
+its `source_system` column (the reclass is MANUAL, the timing item CLAIMS).
 
 ## Scale, seed and determinism
 `--scale` multiplies new business volumes and the planted counts (with small minimums), so

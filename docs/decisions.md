@@ -123,16 +123,25 @@ IDs are permanent and never reused. Status: proposed, accepted, superseded (by D
   are left out of frequency and severity.
 
 ## D-015: Ledger amounts are signed debit-positive; reconciling items are ledger minus subledger
-- Status: proposed 2026-11-08
+- Status: accepted 2026-11-08 (amended: the tolerance was 0.01 per row when proposed)
 - Postings and balances use one signed amount (debit +, credit −). A documented reconciling item's
   `amount` is ledger minus subledger, so `unexplained_difference = difference - documented`.
-  Tolerance 0.01 per row (`macros/accounting_reconciliation_tolerance.sql`).
+- No tolerance (`macros/accounting_reconciliation_tolerance.sql` returns 0): every difference on
+  the default load is 0.00 [V], and a one-cent allowance would let a one-cent conversion bug
+  pass. Supersedes 0.01 per row.
 
 ## D-016: Receivable aging allocation
-- Status: proposed 2026-11-08
-- Refunds first use up the credits they pay out; remaining credits settle the latest-due
-  installments first; cash settles the oldest-due first. The spec does not say whether a credit
-  is refunded or applied to future installments [E].
+- Status: accepted 2026-11-08 (amended: steps 1 and 3 added after the accounting review)
+- Four steps in `int_accounting__installment_allocation`: (1) a reinstatement debit is settled
+  by its own term's cancellation credit (`reversed_amount`); (2) refunds use up the credits that
+  remain, oldest first; (3) the credits left settle their own term's installments, latest due
+  first, and only the rest goes to the policy's other terms; (4) cash settles the oldest due
+  first.
+- Why: pooling credits and cash per policy showed 75 paid-up reinstated policies as past due
+  (45,212.43) while total open was right [V]. The spec does not say whether a credit is refunded
+  or applied to future installments [E].
+- Check: `assert_aging_shows_nothing_past_due_for_paid_up_policies` (fails with 75 rows on the
+  pooled allocation).
 
 ## D-017: In-force premium is the full-term premium at current rates
 - Status: accepted 2026-11-08
@@ -171,3 +180,22 @@ IDs are permanent and never reused. Status: proposed, accepted, superseded (by D
   LOSS_OUTSIDE_TERM and report a check never made; false would assert coverage nobody verified.
   Pinned by the test `(is_loss_outside_term is null) = (not has_matching_policy)`.
 - Filter with `is not true`: `where not is_loss_outside_term` silently drops the 5 orphans.
+
+## D-021: The ledger is reconciled per source system
+- Status: accepted 2026-11-08
+- `rpt_subledger_gl_reconciliation` compares per accounting period x line of business x
+  account x source system. Two accounts are fed by two systems (1000 Cash by billing and
+  claims, 1200 Receivable by policy admin and billing), so compared per account only, an error
+  in one system's journal and an opposite error in the other's would cancel out and show
+  MATCHED.
+- The seed `gl_reconciling_items` gained `source_system`. An existing database needs
+  `dbt seed --full-refresh -s gl_reconciling_items` once.
+
+## D-022: Claim frequency counts claims; severity is per claim
+- Status: accepted 2026-11-08; extends D-014
+- `claim_frequency` = distinct claims / earned exposure years and `average_incurred_severity`
+  = incurred / claims, as in the glossary and the frequency targets of
+  `docs/source-systems.md` section 4. Before, both counted exposures (one coverage and one
+  claimant), which overstated bodily injury frequency.
+- `claimant_frequency` keeps the exposure count, because bodily injury limits apply per
+  person.

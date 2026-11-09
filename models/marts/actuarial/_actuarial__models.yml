@@ -97,19 +97,16 @@ models:
       the calendar year's earned premium against incurred and paid loss of the year's accidents,
       claim counts, and the same excluding catastrophes. Recent years are immature; see
       development_age_months.
+    # No identity tests (incurred = paid + reserve, catastrophe + non-catastrophe = total,
+    # non-catastrophe claims <= claims): dim_claims defines incurred as paid + reserve per claim,
+    # and a sum, or a count of a subset, cannot break them. The one way the catastrophe split
+    # could leak, a null is_catastrophe, is tested on dim_claims. Paid and incurred are checked
+    # against a mart the report is not built from
+    # (tests/actuarial/assert_loss_ratio_incurred_matches_claims_mart.sql).
     data_tests:
       - dbt_utils.unique_combination_of_columns:
           arguments:
             combination_of_columns: ['accident_year', 'line_of_business']
-      - dbt_utils.expression_is_true:
-          arguments:
-            expression: "incurred_loss_amount = net_paid_loss_amount + case_reserve_loss_amount"
-      - dbt_utils.expression_is_true:
-          arguments:
-            expression: "incurred_loss_amount = catastrophe_incurred_loss_amount + non_catastrophe_incurred_loss_amount"
-      - dbt_utils.expression_is_true:
-          arguments:
-            expression: "non_catastrophe_claim_count <= claim_count"
     columns:
       - name: accident_year
         description: Year of the loss date; for premium, the calendar year earned.
