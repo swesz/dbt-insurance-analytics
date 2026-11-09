@@ -16,13 +16,21 @@
 -- severity $5,000 and pure premium $250 per car-year. If the collision premium is $400 per
 -- car-year, the coverage's loss ratio is 250 / 400 = 62.5%.
 --
--- Claim count here means claim exposures: one coverage and one claimant on a claim (3f). A
--- collision that also damages a third party's car is one COLL and one PD exposure, so each
--- coverage counts the claims that hit it. claim_count also shows the distinct claims.
+-- Claim count means distinct claims, as in the glossary ("claims per earned exposure unit")
+-- and the frequency targets of docs/source-systems.md 4. A claim counts once on every coverage
+-- it has an exposure on: a collision that also damages a third party's car is one COLL claim
+-- and one PD claim, because each coverage is priced separately.
 --
--- Severity is per reported exposure, including those closed without payment, and incurred is
--- at the valuation date: recent accident years are immature (reserves still developing, late
--- claims still to come), so their severity, and for liability their frequency, will still move.
+-- Claimants are shown too, under their own name. An exposure is one coverage and one claimant
+-- (3f), so on a coverage the exposure count is the claimant count. It differs from the claim
+-- count only where one claim has several claimants on the same coverage, which is common for
+-- bodily injury (one accident, several injured people) and rare elsewhere. claimant_frequency
+-- is worth keeping for BI: limits apply per person (100,000 per claimant here), so pricing and
+-- reserving look at injured people per car-year as well as at accidents per car-year.
+--
+-- Severity is per claim, including claims closed without payment, and incurred is at the
+-- valuation date: recent accident years are immature (reserves still developing, late claims
+-- still to come), so their severity, and for liability their frequency, will still move.
 -- Catastrophes are shown apart because one event adds thousands of claims to a single year:
 -- the non-catastrophe frequency is the one with a trend.
 --
@@ -181,9 +189,11 @@ final as (
         cast(combined.incurred_loss_amount as decimal(18, 2)) as incurred_loss_amount,
         -- Eight decimals: frequencies are small (0.012 for BI), and the product with severity
         -- should reproduce pure premium to the cent when a reader multiplies them.
-        {{ actuarial_ratio('combined.claim_exposure_count', 'combined.earned_exposure_years', 8) }}
+        {{ actuarial_ratio('combined.claim_count', 'combined.earned_exposure_years', 8) }}
             as claim_frequency,
-        {{ actuarial_ratio('combined.incurred_loss_amount', 'combined.claim_exposure_count', 2) }}
+        {{ actuarial_ratio('combined.claim_exposure_count', 'combined.earned_exposure_years', 8) }}
+            as claimant_frequency,
+        {{ actuarial_ratio('combined.incurred_loss_amount', 'combined.claim_count', 2) }}
             as average_incurred_severity,
         {{ actuarial_ratio('combined.incurred_loss_amount', 'combined.earned_exposure_years', 2) }}
             as pure_premium,

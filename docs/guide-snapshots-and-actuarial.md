@@ -325,17 +325,27 @@ the policy earned premium on that coverage in that month (`fct_premium_by_policy
 collision the exposure of every auto policy would put cars that cannot have a collision claim in
 the denominator.
 
-**Claims** are claim exposures (one coverage and one claimant), so a crash that damages our car
-and another one counts once for COLL and once for PD. Only claims on matched policies with the
-loss inside a term count: orphan claims have no exposure in the base, and claims outside a term
-were not covered. Catastrophes are a separate row (`is_catastrophe_included`), because one storm
-adds hundreds of claims to one year and hides the trend.
+**Claims** are distinct claims, counted on every coverage they have an exposure on, so a crash
+that damages our car and another one counts once for COLL and once for PD. Severity is per
+claim too. Only claims on matched policies with the loss inside a term count: orphan claims have
+no exposure in the base, and claims outside a term were not covered. Catastrophes are a separate
+row (`is_catastrophe_included`), because one storm adds hundreds of claims to one year and hides
+the trend.
+
+**Claimants** are counted as well, in `claim_exposure_count` and `claimant_frequency`. An
+exposure is one coverage and one claimant, so on a coverage the two counts differ only when a
+claim has several claimants on it. That happens on bodily injury (one accident, several injured
+people) and practically nowhere else. It matters there because BI limits apply per person, so
+both "accidents per car-year" and "injured people per car-year" are worth watching. An earlier
+version of the report divided by claimants and called it claim frequency; for BI that put
+frequency 19% to 28% too high, depending on the accident year, and severity too low by the same
+factor (pure premium, loss over exposure, was unaffected).
 
 Accident year 2025, catastrophes excluded:
 
 | coverage | exposure years | claims | frequency | severity | pure premium | premium per exposure year |
 |---|---|---|---|---|---|---|
-| AUTO BI | 10,176.7 | 118 | 0.0116 | $16,205 | $187.90 | $404.53 |
+| AUTO BI | 10,176.7 | 97 | 0.0095 | $19,714 | $187.90 | $404.53 |
 | AUTO PD | 10,176.7 | 351 | 0.0345 | $4,987 | $171.99 | $260.99 |
 | AUTO COLL | 8,683.8 | 458 | 0.0527 | $4,614 | $243.33 | $411.05 |
 | AUTO COMP | 8,683.8 | 366 | 0.0421 | $2,666 | $112.35 | $169.10 |
@@ -353,7 +363,9 @@ Three things to notice:
 - COLL and COMP have 85% of the auto exposure, BI and PD 99.997%: the attribution rule at work
   (most, not all, auto policies carry physical damage). The tiny gap for the mandatory coverages
   is a few days in months where a policy's net earned premium was not positive.
-- BI has 118 exposures on 97 claims: one accident can injure several people.
+- BI has 97 claims but 118 claimants: one accident can injure several people. Its
+  `claimant_frequency` is 0.0116 against a `claim_frequency` of 0.0095. Every other coverage
+  has one claimant per claim in this data, so its two frequencies are equal.
 - PERS_LIAB and BI look cheap for 2025 because they are immature: liability claims are reported
   late and reserves develop upward. Their frequency and severity will rise as the year ages.
 

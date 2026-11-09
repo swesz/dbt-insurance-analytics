@@ -168,8 +168,9 @@ models:
       Claim frequency, average incurred severity and pure premium per accident year, line of
       business and coverage, with catastrophe claims excluded (is_catastrophe_included = false)
       and included (true). Earned exposure is attributed to a coverage when the policy earned
-      premium on it in the month; claims are claim exposures on matched policies with a loss
-      inside a term.
+      premium on it in the month; claims are distinct claims with an exposure on the coverage,
+      on matched policies with a loss inside a term. Frequency and severity are per claim;
+      claimant_frequency counts claimants (claim exposures) instead.
     data_tests:
       - dbt_utils.unique_combination_of_columns:
           arguments:
@@ -211,11 +212,13 @@ models:
               arguments:
                 min_value: 0
       - name: claim_exposure_count
-        description: Claim exposures on the coverage (one per claim and claimant); the frequency numerator.
+        description: >
+          Claim exposures on the coverage, one per claim and claimant: the number of claimants.
+          The numerator of claimant_frequency.
         data_tests:
           - not_null
       - name: claim_count
-        description: Distinct claims with an exposure on the coverage.
+        description: Distinct claims with an exposure on the coverage; the numerator of claim_frequency and the denominator of severity.
         data_tests:
           - not_null
       - name: incurred_loss_amount
@@ -223,9 +226,13 @@ models:
         data_tests:
           - not_null
       - name: claim_frequency
-        description: claim_exposure_count / earned_exposure_years.
+        description: claim_count / earned_exposure_years, claims per exposure year (null without exposure).
+      - name: claimant_frequency
+        description: >
+          claim_exposure_count / earned_exposure_years, claimants per exposure year. Above
+          claim_frequency where claims have several claimants on the coverage (mostly BI).
       - name: average_incurred_severity
-        description: incurred_loss_amount / claim_exposure_count.
+        description: incurred_loss_amount / claim_count, incurred loss per claim (null without claims).
       - name: pure_premium
         description: incurred_loss_amount / earned_exposure_years = frequency x severity.
       - name: earned_premium
