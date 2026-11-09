@@ -1,8 +1,8 @@
 {{ config(materialized='table') }}
 
 -- The general ledger postings the subledgers imply: what the ledger should contain, per
--- accounting period x line of business x GL account, built from the premium, billing and
--- claims subledgers exactly as docs/source-systems.md 3h describes the close.
+-- accounting period x line of business x GL account x source system, built from the premium,
+-- billing and claims subledgers exactly as docs/source-systems.md 3h describes the close.
 --
 -- Amounts are signed, debit positive and credit negative. Each entry below is written as two
 -- legs of opposite sign, so every entry, and therefore every period and line of business, sums
@@ -155,26 +155,31 @@ posting_legs as (
     from claims_by_period
 ),
 
+-- One row per source system, too, not only per account. Two accounts are fed by two systems:
+-- 1000 Cash by billing (customer cash) and claims (payments, recoveries), 1200 Receivable by
+-- policy admin (written premium) and billing (cash collected). The ledger records the source
+-- system on every journal line, so the reconciliation can compare system by system. Summed per
+-- account only, an error in one system and an opposite error in the other within the same
+-- month would cancel out and look MATCHED.
 aggregated as (
     select
         accounting_period,
         line_of_business,
         account_number,
-        -- Which systems feed the row: 1000 gets billing and claims, 1200 policy admin and
-        -- billing. Kept as a list so a difference can be traced to a system.
-        string_agg(distinct source_system, ', ' order by source_system) as source_systems,
+        source_system,
         sum(amount) as subledger_amount
     from posting_legs
-    group by 1, 2, 3
+    group by 1, 2, 3, 4
 ),
 
 final as (
     select
-        accounting_period || '|' || line_of_business || '|' || account_number as posting_key,
+        accounting_period || '|' || line_of_business || '|' || account_number || '|'
+            || source_system as posting_key,
         accounting_period,
         line_of_business,
         account_number,
-        source_systems,
+        source_system,
         cast(subledger_amount as decimal(18, 2)) as subledger_amount
     from aggregated
 )

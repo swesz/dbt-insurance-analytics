@@ -4,10 +4,11 @@ models:
   - name: rpt_subledger_gl_reconciliation
     description: >
       Subledger-to-GL reconciliation per closed accounting period x line of business x GL
-      account: the amount the subledgers imply, the amount in the ledger, the difference, the
-      documented reconciling items (seeds/gl_reconciling_items.csv) and what is left
-      unexplained, with a status. Signed debit positive. Contract enforced: the close checklist
-      and the reconciliation test depend on its shape.
+      account x source system: the amount the subledgers imply, the amount in the ledger, the
+      difference, the documented reconciling items (seeds/gl_reconciling_items.csv) and what is
+      left unexplained, with a status. Per source system because 1000 and 1200 are each fed by
+      two systems, whose errors could otherwise offset. Signed debit positive. Contract
+      enforced: the close checklist and the reconciliation test depend on its shape.
     config:
       contract:
         enforced: true
@@ -17,10 +18,10 @@ models:
     data_tests:
       - dbt_utils.unique_combination_of_columns:
           arguments:
-            combination_of_columns: ['accounting_period', 'line_of_business', 'account_number']
+            combination_of_columns: ['accounting_period', 'line_of_business', 'account_number', 'source_system']
     columns:
       - name: reconciliation_key
-        description: "Primary key: 'period|line_of_business|account_number'."
+        description: "Primary key: 'period|line_of_business|account_number|source_system'."
         data_type: varchar
         constraints:
           - type: not_null
@@ -56,6 +57,17 @@ models:
               arguments:
                 to: ref('gl_accounts')
                 field: account_number
+      - name: source_system
+        description: >
+          The system whose journal the row compares: POLICY_ADMIN, BILLING or CLAIMS (a
+          subledger), or MANUAL (journals posted by accountants, which no subledger has).
+        data_type: varchar
+        constraints:
+          - type: not_null
+        data_tests:
+          - accepted_values:
+              arguments:
+                values: ['POLICY_ADMIN', 'BILLING', 'CLAIMS', 'MANUAL']
       - name: account_name
         description: Account name from seeds/gl_accounts.csv.
         data_type: varchar

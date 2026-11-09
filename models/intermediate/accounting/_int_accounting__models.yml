@@ -74,16 +74,16 @@ models:
   - name: int_accounting__subledger_postings
     description: >
       The GL postings the subledgers imply, per accounting period x line of business x GL
-      account, as signed amounts (debit positive, credit negative), following the posting table
-      in docs/source-systems.md 3h. Covers every period with subledger activity, including the
-      open valuation period.
+      account x source system, as signed amounts (debit positive, credit negative), following
+      the posting table in docs/source-systems.md 3h. Covers every period with subledger
+      activity, including the open valuation period.
     data_tests:
       - dbt_utils.unique_combination_of_columns:
           arguments:
-            combination_of_columns: ['accounting_period', 'line_of_business', 'account_number']
+            combination_of_columns: ['accounting_period', 'line_of_business', 'account_number', 'source_system']
     columns:
       - name: posting_key
-        description: "Primary key: 'period|line_of_business|account_number'."
+        description: "Primary key: 'period|line_of_business|account_number|source_system'."
         data_tests:
           - unique
           - not_null
@@ -110,10 +110,16 @@ models:
               arguments:
                 to: ref('gl_accounts')
                 field: account_number
-      - name: source_systems
-        description: The subledgers that feed the row, comma-separated.
+      - name: source_system
+        description: >
+          The subledger whose journal carries the posting (POLICY_ADMIN, BILLING or CLAIMS), as
+          the ledger's source_system column names it. 1000 has a BILLING and a CLAIMS row, 1200
+          a POLICY_ADMIN and a BILLING row.
         data_tests:
           - not_null
+          - accepted_values:
+              arguments:
+                values: ['POLICY_ADMIN', 'BILLING', 'CLAIMS']
       - name: subledger_amount
         description: Signed amount the ledger should hold for the row.
         data_tests:
@@ -167,7 +173,7 @@ models:
       - name: gl_itd_balance_amount
         description: GL balance at the period end (running sum of activity); null without a ledger export.
       - name: documented_items_amount
-        description: Documented reconciling items of the period (seeds/gl_reconciling_items.csv).
+        description: Documented reconciling items of the period (seeds/gl_reconciling_items.csv), summed over source systems.
         data_tests:
           - not_null
       - name: documented_items_itd_amount

@@ -1,5 +1,5 @@
--- Every subledger-to-GL difference is explained: per closed period, line of business and
--- account, the difference between the ledger and the subledgers equals the documented
+-- Every subledger-to-GL difference is explained: per closed period, line of business, account
+-- and source system, the difference between the ledger and the subledgers equals the documented
 -- reconciling items exactly, to the cent (docs/source-systems.md 3h,
 -- seeds/gl_reconciling_items.csv; the tolerance macro is zero, D-015).
 --

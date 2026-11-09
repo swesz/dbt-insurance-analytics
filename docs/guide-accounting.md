@@ -105,7 +105,8 @@ and the reconciliation of that month would break. That is the test that catches 
 
 ## 4. What a reconciliation proves, and reconciling items
 
-`rpt_subledger_gl_reconciliation` compares, per closed period, line of business and account:
+`rpt_subledger_gl_reconciliation` compares, per closed period, line of business, account and
+source system:
 
 ```
 difference              = gl_amount - subledger_amount
@@ -117,13 +118,22 @@ A row at zero proves that the ledger's figure is fully supported by the detail: 
 posted twice, to the wrong line or account, or left out. It does not prove that the detail is
 right; the control-total tests in `tests/premium` and `tests/claims` check that.
 
+Why the source system is part of the row. Two accounts are fed by two systems: 1000 Cash by
+billing (customer cash) and claims (payments and recoveries), 1200 Premiums receivable by policy
+admin (written premium) and billing (collections). Compared per account only, a billing journal
+500.00 short and a claims journal 500.00 over in the same month cancel out, and the row shows
+MATCHED although two journals are wrong. Every ledger line names the system whose journal posted
+it (`source_system`: POLICY_ADMIN, BILLING, CLAIMS, or MANUAL for journals accountants post by
+hand), and every expected posting knows its system, so the reconciliation compares system by
+system and the same two errors show as two UNEXPLAINED rows.
+
 Not every difference is an error. An accountant may post a manual journal, or an interface may
 deliver an entry a month late. Those are **reconciling items**: a difference that is understood,
 correct, and documented. Each is a row in `seeds/gl_reconciling_items.csv`:
 
 | Column | Meaning |
 |---|---|
-| `accounting_period`, `account_number`, `line_of_business` | the reconciliation row it explains |
+| `accounting_period`, `account_number`, `line_of_business`, `source_system` | the reconciliation row it explains: the system is the journal that differs (MANUAL for a manual journal, CLAIMS for a claims interface item) |
 | `amount` | the amount by which the ledger differs from the subledger, signed like `difference` |
 | `item_type` | `MANUAL_JOURNAL`, `TIMING`, ... |
 | `explanation` | what happened, which journal, and when it reverses, in words a reviewer can check |
@@ -285,7 +295,8 @@ collected 300.00. Receivable (GL view) 300.00 = billed-and-due receivable 0.00 +
 **A reconciling item.** Suppose the claims interface had sent the March payment in April. The
 ledger's March 5000 would be 1,000.00 short and April's 1,000.00 over. The reconciliation shows
 a difference of -1,000.00 on 2024-03 / 5000 and +1,000.00 on 2024-04 / 5000 (and the opposite
-on 1000). With four rows in the reconciling-items seed, one per period and account, all four
+on 1000). With four rows in the reconciling-items seed, one per period and account, each with
+source system CLAIMS (the journal that was short, then over), all four
 rows become EXPLAINED. The case reserve rollforward is unaffected, because only the payment was
 late: the erosion is a reserve posting, and it went through on time. Section 7 shows that this
 is exactly what happened in this data set.
@@ -294,17 +305,24 @@ is exactly what happened in this data set.
 
 On the default load (valuation 2026-09-30), the ledger has exports for 56 closed periods,
 2022-01 to 2026-08; 2026-09 is still open, so the reports show subledger figures for it and
-null GL columns. Of 1,344 reconciliation rows, 1,338 are MATCHED and 6 are EXPLAINED by the
-items in `seeds/gl_reconciling_items.csv`:
+null GL columns. Of 1,570 reconciliation rows (448 POLICY_ADMIN, 224 BILLING, 896 CLAIMS and 2
+MANUAL), 1,564 are MATCHED and 6 are EXPLAINED by the items in
+`seeds/gl_reconciling_items.csv`; none is UNEXPLAINED:
 
-| Period | Account | Line | Difference (GL - subledger) | Item |
-|---|---|---|---|---|
-| 2024-06 | 4000 | AUTO | +25,523.10 | manual journal JE-2024-06-0007 moved written premium from AUTO to HOME |
-| 2024-06 | 4000 | HOME | -25,523.10 | the other side of the same journal |
-| 2025-08 | 5000 | AUTO | -11,926.78 | five AUTO loss payments entered on Sunday 2025-08-31, booked in 2025-08, that the claims interface did not send at the close |
-| 2025-08 | 1000 | AUTO | +11,926.78 | their cash side |
-| 2025-09 | 5000 | AUTO | +11,926.78 | the same payments, posted in 2025-09 |
-| 2025-09 | 1000 | AUTO | -11,926.78 | their cash side |
+| Period | Account | Line | Source | Difference (GL - subledger) | Item |
+|---|---|---|---|---|---|
+| 2024-06 | 4000 | AUTO | MANUAL | +25,523.10 | manual journal JE-2024-06-0007 moved written premium from AUTO to HOME |
+| 2024-06 | 4000 | HOME | MANUAL | -25,523.10 | the other side of the same journal |
+| 2025-08 | 5000 | AUTO | CLAIMS | -11,926.78 | five AUTO loss payments entered on Sunday 2025-08-31, booked in 2025-08, that the claims interface did not send at the close |
+| 2025-08 | 1000 | AUTO | CLAIMS | +11,926.78 | their cash side |
+| 2025-09 | 5000 | AUTO | CLAIMS | +11,926.78 | the same payments, posted in 2025-09 |
+| 2025-09 | 1000 | AUTO | CLAIMS | -11,926.78 | their cash side |
+
+The six differences equal, to the cent, the reconciling items the generator says it planted
+(`data/generated/gl_reconciling_items_expected.csv`), and no other row has a difference. With
+the source system in the row, the reclass now sits on its own MANUAL rows (the POLICY_ADMIN
+4000 rows of 2024-06 are MATCHED), and the timing item on CLAIMS 1000 (BILLING 1000 of 2025-08
+is MATCHED).
 
 How each was found. The reconciliation showed the six rows; for the reclass, the ledger had a
 two-line MANUAL journal of exactly 25,523.10 and no subledger has manual journals. For the

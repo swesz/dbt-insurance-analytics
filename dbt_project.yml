@@ -74,6 +74,7 @@ seeds:
         accounting_period: varchar
         account_number: varchar
         line_of_business: varchar
+        source_system: varchar
         amount: decimal(18, 2)
         item_type: varchar
         explanation: varchar
