@@ -11,7 +11,40 @@ independently in Python.
 Everything runs locally on DuckDB in a few minutes, with no account and no cost, and CI rebuilds
 it from scratch on every push.
 
-<!-- RESULTS -->
+## Results
+
+Rebuilt from an empty warehouse at the default settings (seed 42, valuation date 2026-09-30).
+Each figure was checked by something other than the code that produced it.
+
+| Check | Result |
+|---|---|
+| Build | `dbt build` into empty dev and prod databases: 792 nodes each, 0 errors, under a minute each |
+| Warnings | 2, both planted defects that are kept and flagged on purpose, at their exact planted counts: 13 losses outside the policy term, 5 orphan claims |
+| Control totals | all 1,056 figures the generator computed in Python (11 metrics, by period or accident year and line) equal the SQL results |
+| General ledger | 1,344 account × period × line rows (2022-01 to 2026-08): 1,338 match, 6 are the two documented reconciling items, 0 unexplained |
+| Premium | all-time written premium equals the raw transactions to the cent (auto $42,404,506.34, home $29,051,754.93), and earned plus unearned equals written exactly |
+| History | 21 month-end closes replayed in under 4 minutes; restated policies in force differ from the as-reported figure in 26 of 42 period × line rows, by −1 to +3 policies |
+| Reproducibility | two generator runs write byte-identical files |
+
+Volume: 24,316 policies, 68,558 terms, 82,236 premium transactions (290,285 coverage lines),
+352,980 installments, 299,262 payments, 4,477 claims in 8,597 CDC versions, 44,206 claim
+transactions and 1,822 ledger lines.
+
+Accident-year loss ratios (incurred loss over earned premium, at the valuation date):
+
+| Accident year | Auto | Home | Home excluding catastrophes |
+|---|---|---|---|
+| 2022 | 71% | 66% | 57% |
+| 2023 | 87% | 86% | 65% |
+| 2024 | 69% | 59% | 52% |
+| 2025 | 58% | 78% | 59% |
+| 2026 (9 months) | 63% | 65% | 53% |
+
+Auto 2023 is high mostly because of bodily injury: that accident year has the highest bodily
+injury frequency (1.6 claims per 100 exposure years, against 1.2 in 2024) and average severity
+($22,000). The generator plants no 2023 shock, so this is random variation in a few large
+claims. 2025 and 2026 are immature: claims for those accidents are still being reported and
+their reserves still develop. The chain-ladder analysis in `analyses/` estimates how far.
 
 ## What is in it
 
@@ -57,7 +90,7 @@ Three databases stand in for three warehouse projects: `raw` is written only by 
 
 The models target a cloud warehouse workflow, but run on DuckDB, because BigQuery without
 billing (the sandbox) cannot run this project. Google's
-[sandbox page](https://cloud.google.com/bigquery/docs/sandbox) lists these limits:
+[sandbox page](https://docs.cloud.google.com/bigquery/docs/sandbox) lists these limits:
 
 - no DML statements (MERGE, UPDATE, DELETE);
 - no streaming and no Data Transfer Service;
@@ -110,7 +143,8 @@ A number counts only if something other than the code that produced it agrees wi
 1. **Control totals.** The generator computes written, earned and unearned premium, policies in
    force, paid losses, case reserves and claim counts in Python from its own records. The dbt
    models compute the same figures in SQL from the raw tables, and tests in `tests/` compare them
-   per period and line of business.
+   per period and line of business. A guard test fails if the load is not the one the totals
+   describe, so the comparisons cannot pass by being skipped.
 2. **General ledger.** The ledger's journals are posted from the subledgers at each close. The
    reconciliation model rebuilds those postings from the marts and compares every account, period
    and line. Differences must be documented as reconciling items in
@@ -162,4 +196,5 @@ independently computed numbers before it counts.
 - A cloud warehouse target (the SQL avoids DuckDB-only features where standard SQL works).
 - One real public source next to the generated core, such as flood insurance claims.
 - A hosted dbt docs site and a small dashboard on the marts.
-- Reinsurance (ceded premium and losses) and IBNR estimates in the marts.
+- Reinsurance (ceded premium and losses), and IBNR as a mart (today it is estimated only in the
+  chain-ladder analysis).
