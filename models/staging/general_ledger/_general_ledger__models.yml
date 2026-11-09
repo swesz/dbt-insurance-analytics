@@ -1,0 +1,170 @@
+version: 2
+
+models:
+  - name: stg_general_ledger__journal_lines
+    description: >
+      General ledger journal lines, typed: amounts parsed to decimals (thousands separators
+      removed), posting_date parsed from MM/DD/YYYY, and only the latest export file of each
+      accounting period kept (GL_FILE_REEXPORTED). Signed net_amount is debit minus credit.
+    data_tests:
+      # A journal line appears once per period once the superseded export file is dropped.
+      - dbt_utils.unique_combination_of_columns:
+          arguments:
+            combination_of_columns: ['journal_id', 'line_number']
+      # Debits and credits are both non-negative (docs/source-systems.md 3h); a negative
+      # amount would mean the export flipped its sign convention.
+      - dbt_utils.expression_is_true:
+          arguments:
+            expression: "debit_amount >= 0 and credit_amount >= 0"
+      # Postings for a period happen in the period or during its close, never before it.
+      - dbt_utils.expression_is_true:
+          arguments:
+            expression: "strftime(posting_date, '%Y-%m') >= accounting_period"
+    columns:
+      - name: journal_id
+        description: "Journal identifier, e.g. 'JE-2024-06-0001'."
+        data_tests:
+          - not_null
+      - name: line_number
+        description: Line within the journal.
+        data_tests:
+          - not_null
+      - name: accounting_period
+        description: "Accounting period, 'YYYY-MM'."
+        data_tests:
+          - not_null
+          - relationships:
+              arguments:
+                to: ref('accounting_periods')
+                field: accounting_period
+      - name: posting_date
+        description: Posting date, parsed from 'MM/DD/YYYY'.
+        data_tests:
+          - not_null
+      - name: account_number
+        description: GL account (seeds/gl_accounts.csv).
+        data_tests:
+          - not_null
+          - relationships:
+              arguments:
+                to: ref('gl_accounts')
+                field: account_number
+      - name: line_of_business
+        description: AUTO or HOME.
+        data_tests:
+          - not_null
+          - accepted_values:
+              arguments:
+                values: ['AUTO', 'HOME']
+      - name: debit_amount
+        description: Debit in dollars; 0 when the line is a credit.
+        data_tests:
+          - not_null
+      - name: credit_amount
+        description: Credit in dollars; 0 when the line is a debit.
+        data_tests:
+          - not_null
+      - name: net_amount
+        description: debit_amount - credit_amount (debit positive, credit negative).
+        data_tests:
+          - not_null
+      - name: source_system
+        description: The system the journal came from.
+        data_tests:
+          - not_null
+          - accepted_values:
+              arguments:
+                values: ['POLICY_ADMIN', 'BILLING', 'CLAIMS', 'MANUAL']
+      - name: description
+        description: Free-text line description.
+      - name: source_file_name
+        description: The export file the line was loaded from (the latest of its period).
+        data_tests:
+          - not_null
+      - name: source_file_line
+        description: Line number within that file.
+      - name: file_modified_at
+        description: Modification time of the export file.
+      - name: synced_at
+        description: When the file connector loaded the row.
+
+unit_tests:
+  # GL_AMOUNT_FORMAT_CHANGE: an empty side, a plain amount, and an amount with a thousands
+  # separator. All three must parse, and the empty side must be 0, not null.
+  - name: test_gl_amount_parsing
+    description: >
+      Empty text is 0; '1234.56' and '1,234.56' both parse to 1234.56; a large amount with two
+      separators parses too. posting_date parses from MM/DD/YYYY.
+    model: stg_general_ledger__journal_lines
+    given:
+      - input: source('general_ledger', 'journal_lines')
+        rows:
+          - {journal_id: JE-2024-12-0001, line_number: '1', accounting_period: '2024-12',
+             posting_date: '01/07/2025', account_number: '1200', line_of_business: AUTO,
+             debit: '1234.56', credit: '', source_system: POLICY_ADMIN, description: x,
+             _file: gl_export_2024_12.csv, _line: 2, _modified: '2025-01-07 18:00:00'}
+          - {journal_id: JE-2024-12-0001, line_number: '2', accounting_period: '2024-12',
+             posting_date: '01/07/2025', account_number: '4000', line_of_business: AUTO,
+             debit: '', credit: '1234.56', source_system: POLICY_ADMIN, description: x,
+             _file: gl_export_2024_12.csv, _line: 3, _modified: '2025-01-07 18:00:00'}
+          - {journal_id: JE-2025-01-0001, line_number: '1', accounting_period: '2025-01',
+             posting_date: '02/06/2025', account_number: '1200', line_of_business: HOME,
+             debit: '1,234.56', credit: '', source_system: POLICY_ADMIN, description: x,
+             _file: gl_export_2025_01.csv, _line: 2, _modified: '2025-02-06 18:00:00'}
+          - {journal_id: JE-2025-01-0001, line_number: '2', accounting_period: '2025-01',
+             posting_date: '02/06/2025', account_number: '4000', line_of_business: HOME,
+             debit: ' ', credit: '1,234,567.89', source_system: POLICY_ADMIN, description: x,
+             _file: gl_export_2025_01.csv, _line: 3, _modified: '2025-02-06 18:00:00'}
+    expect:
+      rows:
+        - {journal_id: JE-2024-12-0001, line_number: 1, posting_date: '2025-01-07', debit_amount: 1234.56, credit_amount: 0, net_amount: 1234.56}
+        - {journal_id: JE-2024-12-0001, line_number: 2, posting_date: '2025-01-07', debit_amount: 0, credit_amount: 1234.56, net_amount: -1234.56}
+        - {journal_id: JE-2025-01-0001, line_number: 1, posting_date: '2025-02-06', debit_amount: 1234.56, credit_amount: 0, net_amount: 1234.56}
+        - {journal_id: JE-2025-01-0001, line_number: 2, posting_date: '2025-02-06', debit_amount: 0, credit_amount: 1234567.89, net_amount: -1234567.89}
+
+  # GL_FILE_REEXPORTED: two files for 2025-03. The v2 file is newer, so it replaces the first
+  # file as a whole, including the line the correction dropped (line 3 exists only in the old
+  # file and must not survive). 2025-02 has one file and is untouched.
+  - name: test_gl_keeps_latest_file_per_period
+    description: >
+      For a period exported twice, only the lines of the file with the latest _modified remain,
+      even where the old file had lines the new one lacks; other periods are unaffected.
+    model: stg_general_ledger__journal_lines
+    given:
+      - input: source('general_ledger', 'journal_lines')
+        rows:
+          - {journal_id: JE-2025-02-0001, line_number: '1', accounting_period: '2025-02',
+             posting_date: '03/06/2025', account_number: '1000', line_of_business: AUTO,
+             debit: '10.00', credit: '', source_system: BILLING, description: x,
+             _file: gl_export_2025_02.csv, _line: 2, _modified: '2025-03-06 18:00:00',
+             _fivetran_synced: '2025-03-07 00:00:00'}
+          - {journal_id: JE-2025-03-0001, line_number: '1', accounting_period: '2025-03',
+             posting_date: '04/04/2025', account_number: '1000', line_of_business: AUTO,
+             debit: '100.00', credit: '', source_system: BILLING, description: old,
+             _file: gl_export_2025_03.csv, _line: 2, _modified: '2025-04-04 18:00:00',
+             _fivetran_synced: '2025-04-05 00:00:00'}
+          - {journal_id: JE-2025-03-0001, line_number: '2', accounting_period: '2025-03',
+             posting_date: '04/04/2025', account_number: '1200', line_of_business: AUTO,
+             debit: '', credit: '100.00', source_system: BILLING, description: old,
+             _file: gl_export_2025_03.csv, _line: 3, _modified: '2025-04-04 18:00:00',
+             _fivetran_synced: '2025-04-05 00:00:00'}
+          - {journal_id: JE-2025-03-0001, line_number: '3', accounting_period: '2025-03',
+             posting_date: '04/04/2025', account_number: '1200', line_of_business: AUTO,
+             debit: '', credit: '5.00', source_system: BILLING, description: old,
+             _file: gl_export_2025_03.csv, _line: 4, _modified: '2025-04-04 18:00:00',
+             _fivetran_synced: '2025-04-05 00:00:00'}
+          - {journal_id: JE-2025-03-0001, line_number: '1', accounting_period: '2025-03',
+             posting_date: '04/04/2025', account_number: '1000', line_of_business: AUTO,
+             debit: '105.00', credit: '', source_system: BILLING, description: new,
+             _file: gl_export_2025_03_v2.csv, _line: 2, _modified: '2025-04-09 11:00:00',
+             _fivetran_synced: '2025-04-09 12:00:00'}
+          - {journal_id: JE-2025-03-0001, line_number: '2', accounting_period: '2025-03',
+             posting_date: '04/04/2025', account_number: '1200', line_of_business: AUTO,
+             debit: '', credit: '105.00', source_system: BILLING, description: new,
+             _file: gl_export_2025_03_v2.csv, _line: 3, _modified: '2025-04-09 11:00:00',
+             _fivetran_synced: '2025-04-09 12:00:00'}
+    expect:
+      rows:
+        - {journal_id: JE-2025-02-0001, line_number: 1, net_amount: 10.00, source_file_name: gl_export_2025_02.csv}
+        - {journal_id: JE-2025-03-0001, line_number: 1, net_amount: 105.00, source_file_name: gl_export_2025_03_v2.csv}
+        - {journal_id: JE-2025-03-0001, line_number: 2, net_amount: -105.00, source_file_name: gl_export_2025_03_v2.csv}

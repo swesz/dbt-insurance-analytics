@@ -1,0 +1,98 @@
+version: 2
+
+sources:
+  - name: billing
+    database: raw
+    schema: billing
+    description: >
+      The billing system, replicated Fivetran-style: one row per primary key in its latest
+      state, soft deletes kept with _fivetran_deleted = true (docs/source-systems.md 2b, 2e).
+      Amounts are integer cents, the only system that stores money that way
+      (BILLING_AMOUNTS_IN_CENTS); staging converts them to dollars.
+    config:
+      # Freshness asks "when did the connector last write anything?". Fivetran stamps each row
+      # it writes with _fivetran_synced, and syncs run every 6 hours. Payments arrive every
+      # business day, so a day without a write means a broken connector: warn after one day,
+      # error after three. `dbt source freshness` compares with the wall clock, so a load of
+      # generated history (it ends on the valuation date) reports stale by design; `dbt build`
+      # does not run it.
+      loaded_at_field: _fivetran_synced
+      freshness:
+        warn_after: {count: 24, period: hour}
+        error_after: {count: 72, period: hour}
+    tables:
+      - name: installments
+        description: >
+          The billing schedule: what the customer is asked to pay and when. Every policy
+          transaction is billed in one or more installments that add up to its written premium.
+          A customer can move a future due date; the row is then overwritten.
+        columns:
+          - name: installment_id
+            description: Primary key.
+            data_tests:
+              - unique
+              - not_null
+          - name: policy_id
+            description: The policy billed. 9000000 and up are QA test policies.
+            data_tests:
+              - not_null
+          - name: term_id
+            description: The policy term billed.
+            data_tests:
+              - not_null
+          - name: transaction_id
+            description: The policy transaction this installment bills.
+            data_tests:
+              - not_null
+          - name: installment_number
+            description: 1..n within the transaction.
+          - name: due_date
+            description: When the installment is due (current state; can be rescheduled).
+          - name: amount_cents
+            description: Signed amount in integer cents; negative is a credit.
+          - name: created_at
+            description: When the installment was created.
+          - name: updated_at
+            description: Last change in the source (a rescheduled due date).
+          - name: _fivetran_synced
+            description: When the connector last wrote the row.
+          - name: _fivetran_deleted
+            description: True when the row was deleted in the source.
+
+      - name: payments
+        description: >
+          Money received from customers (positive) and refunds paid out to them (negative). A
+          payment returned by the bank (insufficient funds) is overwritten in place:
+          payment_status becomes RETURNED and returned_at is set (RETURNED_PAYMENTS).
+        columns:
+          - name: payment_id
+            description: Primary key.
+            data_tests:
+              - unique
+              - not_null
+          - name: policy_id
+            description: The policy paid for. 9000000 and up are QA test policies.
+            data_tests:
+              - not_null
+          - name: received_at
+            description: When the money was received (or the refund paid out).
+            data_tests:
+              - not_null
+          - name: amount_cents
+            description: Signed amount in integer cents; positive received, negative refunded.
+            data_tests:
+              - not_null
+          - name: payment_method
+            description: ACH, CARD or CHECK.
+          - name: payment_status
+            description: Current state, SETTLED or RETURNED.
+          - name: returned_at
+            description: Null unless the bank returned the payment.
+          - name: created_at
+            description: When the payment row was created.
+          - name: updated_at
+            description: Last change in the source (a return).
+          - name: _fivetran_synced
+            description: When the connector last wrote the row.
+          - name: _fivetran_deleted
+            description: True when the row was deleted in the source.

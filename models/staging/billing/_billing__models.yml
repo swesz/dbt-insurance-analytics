@@ -1,0 +1,149 @@
+version: 2
+
+models:
+  - name: stg_billing__installments
+    description: >
+      Billing installments, one row per installment_id, amounts in dollars. Soft-deleted rows
+      are removed; installments of QA test policies are kept and flagged with is_test_policy.
+    data_tests:
+      - dbt_utils.unique_combination_of_columns:
+          arguments:
+            combination_of_columns: ['transaction_id', 'installment_number']
+      # A credit is never more than its sign: is_credit agrees with the amount.
+      - dbt_utils.expression_is_true:
+          arguments:
+            expression: "is_credit = (installment_amount < 0)"
+    columns:
+      - name: installment_id
+        description: Primary key.
+        data_tests:
+          - unique
+          - not_null
+      - name: policy_id
+        description: The policy billed.
+        data_tests:
+          - not_null
+          - relationships:
+              arguments:
+                to: ref('stg_policy_admin__policies')
+                field: policy_id
+      - name: term_id
+        description: The term billed.
+        data_tests:
+          - not_null
+          - relationships:
+              arguments:
+                to: ref('stg_policy_admin__policy_terms')
+                field: term_id
+      - name: transaction_id
+        description: The policy transaction this installment bills.
+        data_tests:
+          - not_null
+          - relationships:
+              arguments:
+                to: ref('stg_policy_admin__policy_transactions')
+                field: transaction_id
+      - name: installment_number
+        description: 1..n within the transaction.
+        data_tests:
+          - not_null
+          - dbt_utils.accepted_range:
+              arguments:
+                min_value: 1
+      - name: due_date
+        description: When the installment is due, in its current (possibly rescheduled) state.
+        data_tests:
+          - not_null
+      - name: installment_amount
+        description: Signed amount in dollars (amount_cents / 100); negative is a credit.
+        data_tests:
+          - not_null
+      - name: is_credit
+        description: True for a negative installment (return premium, credit endorsement).
+        data_tests:
+          - not_null
+      - name: is_test_policy
+        description: True for QA test policies (policy_id >= 9000000).
+        data_tests:
+          - not_null
+      - name: created_at
+        description: When the installment was created.
+        data_tests:
+          - not_null
+      - name: updated_at
+        description: Last change in the source.
+
+  - name: stg_billing__payments
+    description: >
+      Payments received and refunds paid, one row per payment_id, amounts in dollars, in their
+      current state (a returned payment is overwritten with RETURNED and returned_at).
+      Soft-deleted rows are removed; QA test policies' payments are kept and flagged.
+    data_tests:
+      # The status and the return timestamp describe the same fact; they must agree.
+      - dbt_utils.expression_is_true:
+          arguments:
+            expression: "is_returned = (returned_at is not null)"
+      # Only money received can bounce; a refund is money we paid out.
+      - dbt_utils.expression_is_true:
+          arguments:
+            expression: "not is_returned or payment_amount > 0"
+      - dbt_utils.expression_is_true:
+          arguments:
+            expression: "returned_at is null or returned_at >= received_at"
+    columns:
+      - name: payment_id
+        description: Primary key.
+        data_tests:
+          - unique
+          - not_null
+      - name: policy_id
+        description: The policy paid for.
+        data_tests:
+          - not_null
+          - relationships:
+              arguments:
+                to: ref('stg_policy_admin__policies')
+                field: policy_id
+      - name: received_at
+        description: When the money was received or the refund paid out.
+        data_tests:
+          - not_null
+      - name: received_date
+        description: Date of received_at; its calendar month is the month the GL books the cash.
+        data_tests:
+          - not_null
+      - name: payment_amount
+        description: Signed amount in dollars; positive received, negative refunded.
+        data_tests:
+          - not_null
+      - name: is_refund
+        description: True when money was paid out to the customer (negative amount).
+        data_tests:
+          - not_null
+      - name: payment_method
+        description: ACH, CARD or CHECK.
+        data_tests:
+          - accepted_values:
+              arguments:
+                values: ['ACH', 'CARD', 'CHECK']
+      - name: payment_status
+        description: Current state, SETTLED or RETURNED.
+        data_tests:
+          - not_null
+          - accepted_values:
+              arguments:
+                values: ['SETTLED', 'RETURNED']
+      - name: is_returned
+        description: True when the bank returned the payment (RETURNED_PAYMENTS).
+        data_tests:
+          - not_null
+      - name: returned_at
+        description: When the payment was returned; null otherwise.
+      - name: is_test_policy
+        description: True for QA test policies (policy_id >= 9000000).
+        data_tests:
+          - not_null
+      - name: created_at
+        description: When the payment row was created.
+      - name: updated_at
+        description: Last change in the source.
