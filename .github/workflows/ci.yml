@@ -24,7 +24,8 @@ jobs:
         with:
           fetch-depth: 0 # the public-safety check scans the full history
 
-      - uses: astral-sh/setup-uv@v10
+      # setup-uv publishes only full version tags (no moving `v10` tag), so pin one exactly.
+      - uses: astral-sh/setup-uv@v10.3.3
         with:
           enable-cache: true
 
