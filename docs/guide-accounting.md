@@ -69,6 +69,12 @@ The entries the subledgers send (source-systems.md 3h):
 A negative amount swaps the sides: a cancellation credits 1200 and debits 4000; a month that
 earns more than it writes lowers the UPR, debiting 2100 and crediting 4100.
 
+One simplification to know about: every recovery is posted to 5050, whatever its cost
+category. That is right for salvage and subrogation on a loss, and every recovery in this data
+is a loss recovery (309 of them). A recovered expense would belong against 5200 instead. The
+reconciliation would not flag the misposting, because the generator's ledger makes the same
+assumption; the comment in `int_accounting__subledger_postings` says what would.
+
 **Convention in every accounting model:** amounts are *signed*, debit positive and credit
 negative. An entry is two legs that sum to zero, a trial balance sums to zero, and the
 reconciliation is a subtraction whatever the account type. Reports that present a liability

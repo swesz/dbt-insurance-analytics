@@ -79,6 +79,13 @@ claims_by_period as (
         -- Recoveries are money coming back, so their paid_amount is negative (net paid =
         -- payments - recoveries). The ledger books the money received as a positive debit to
         -- cash, hence the minus sign.
+        -- Known limitation: every RECOVERY goes to 5050 Salvage and subrogation, whatever its
+        -- cost category. That is right for loss recoveries, and today all recoveries are LOSS.
+        -- An EXPENSE recovery (recovered defense costs, say) belongs against LAE (5200) and
+        -- would be misposted. The reconciliation would not notice, because the generator's
+        -- ledger also posts every recovery to 5050; the claims control-total tests would, since
+        -- dbt nets a recovery against its own cost category and the generator against loss.
+        -- Split this by cost_category before expense recoveries appear.
         -sum(case
             when transaction_type = 'RECOVERY' then paid_amount
             else 0
