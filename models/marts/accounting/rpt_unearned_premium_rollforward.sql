@@ -7,12 +7,14 @@
 --
 --     opening + written - earned = closing
 --
--- That identity holds by construction of the premium subledger (docs/source-systems.md 3d) and
--- is tested anyway (tests/accounting/assert_unearned_premium_rollforward_ties_to_gl.sql), because
--- a missing period row or a dropped line would break it. The closing balance is then compared
--- with the ledger's account 2100: the ledger only knows the monthly "increase in UPR" postings,
--- so if their running total equals the subledger's closing balance, every month's posting was
--- right.
+-- Written, earned and closing come from three separate columns of the premium subledger, so the
+-- identity can fail (a missing period row, a dropped line) and is tested
+-- (tests/accounting/assert_unearned_premium_rollforward_ties_to_gl.sql). The opening is the
+-- prior row's closing (lag), by construction, so that part is not tested. The evidence that
+-- the figures are right comes from outside the model: the closing balance is compared with the
+-- ledger's account 2100 (the ledger only knows the monthly "increase in UPR" postings, so if
+-- their running total equals the subledger's closing balance, every month's posting was
+-- right), and written, earned and closing with the generator's control totals.
 --
 -- Amounts are shown in their natural sign: a liability's credit balance as a positive number.
 -- Periods still open at the valuation date have no ledger export yet: their GL columns are null.

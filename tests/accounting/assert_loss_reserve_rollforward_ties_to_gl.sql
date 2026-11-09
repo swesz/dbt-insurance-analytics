@@ -1,13 +1,25 @@
--- The case reserve rollforward ties, and agrees with the ledger:
---   1. opening + incurred - paid = closing, per period, line of business and cost category,
---      and the opening balance is the prior period's closing balance;
---   2. the closing reserve equals the claims subledger's own month-end balances
---      (fct_claim_exposure_period_balances summed), an independent computation of the same
---      figure from the claims team's model;
---   3. for every closed period, the closing reserve equals the ledger's 2200 (LOSS) or 2300
---      (EXPENSE) balance, apart from documented reconciling items.
--- Within a cent (macro accounting_reconciliation_tolerance).
-
+-- The case reserve rollforward agrees with independent records of the same figures:
+--   1. the ledger: for every closed period, the closing reserve equals the ledger's 2200 (LOSS)
+--      or 2300 (EXPENSE) balance, apart from documented reconciling items. The ledger only
+--      ever received the monthly reserve-change postings, so a match proves every month's
+--      posting up to then;
+--   2. the generator: on the default load, the closing reserve and the period's net paid equal
+--      the generator's control totals (case_reserve_loss_end, case_reserve_expense_end,
+--      paid_loss_net, paid_expense) per period and line of business, which it computes in
+--      Python from its own records;
+--   3. the claims mart: the closing reserve equals fct_claim_exposure_period_balances summed.
+--      Both models are built from int_claims__financial_events, so this does not check how
+--      claim transactions are booked (1 and 2 do). It checks aggregation: that the
+--      rollforward, built on the incremental fct_claim_transactions, agrees with the balances,
+--      rebuilt in full every run, so an event an incremental run lost or doubled would show.
+--
+-- Not tested: opening + incurred - paid = closing, and opening = the prior closing. The report
+-- defines incurred as paid + the change in reserve, and the opening as closing - change, so
+-- both hold by algebra and a test of them could never fail.
+--
+-- Exact to the cent: the tolerance (macro accounting_reconciliation_tolerance) is zero. The
+-- control-total check runs only on the load the control totals describe (load_info.as_of);
+-- on any other load it returns nothing and the other two checks still apply.
 with rollforward as (
     select * from {{ ref('rpt_loss_reserve_rollforward') }}
 ),
@@ -16,7 +28,82 @@ exposure_balances as (
     select * from {{ ref('fct_claim_exposure_period_balances') }}
 ),
 
-claims_view as (
+load_info as (
+    select * from {{ source('generator_audit', 'load_info') }}
+),
+
+control_totals as (
+    select * from {{ source('generator_audit', 'control_totals') }}
+),
+
+ledger_breaks as (
+    select
+        accounting_period,
+        line_of_business,
+        cost_category as measure,
+        'ledger' as check_name,
+        unexplained_difference as break_amount
+    from rollforward
+    where is_period_closed
+        and abs(coalesce(unexplained_difference, 0)) > {{ accounting_reconciliation_tolerance() }}
+),
+
+expected as (
+    select
+        control_totals.metric,
+        control_totals.period as accounting_period,
+        control_totals.line_of_business,
+        control_totals.value
+    from control_totals
+    inner join load_info
+        on control_totals.as_of = load_info.as_of
+    where control_totals.grain = 'accounting_period'
+        and control_totals.metric in (
+            'case_reserve_loss_end', 'case_reserve_expense_end', 'paid_loss_net', 'paid_expense'
+        )
+),
+
+actual as (
+    select
+        case cost_category
+            when 'LOSS' then 'case_reserve_loss_end'
+            else 'case_reserve_expense_end'
+        end as metric,
+        accounting_period,
+        line_of_business,
+        closing_case_reserve as value
+    from rollforward
+
+    union all
+
+    select
+        case cost_category when 'LOSS' then 'paid_loss_net' else 'paid_expense' end as metric,
+        accounting_period,
+        line_of_business,
+        paid_amount as value
+    from rollforward
+),
+
+-- A row missing on one side counts as zero (a period without activity), so the full outer
+-- join also catches a period the report lacks or one the generator does not know.
+control_total_breaks as (
+    select
+        coalesce(expected.accounting_period, actual.accounting_period) as accounting_period,
+        coalesce(expected.line_of_business, actual.line_of_business) as line_of_business,
+        coalesce(expected.metric, actual.metric) as measure,
+        'control_totals' as check_name,
+        coalesce(actual.value, 0) - coalesce(expected.value, 0) as break_amount
+    from expected
+    full outer join actual
+        on expected.metric = actual.metric
+        and expected.accounting_period = actual.accounting_period
+        and expected.line_of_business = actual.line_of_business
+    where abs(coalesce(actual.value, 0) - coalesce(expected.value, 0))
+            > {{ accounting_reconciliation_tolerance() }}
+        and exists (select 1 from expected)
+),
+
+claims_mart as (
     select
         accounting_period,
         line_of_business,
@@ -26,30 +113,25 @@ claims_view as (
     group by 1, 2, 3
 ),
 
-checked as (
+claims_mart_breaks as (
     select
-        rollforward.*,
-        rollforward.opening_case_reserve + rollforward.incurred_amount
-            - rollforward.paid_amount - rollforward.closing_case_reserve as rollforward_break,
-        rollforward.opening_case_reserve - coalesce(lag(rollforward.closing_case_reserve) over (
-            partition by rollforward.line_of_business, rollforward.cost_category
-            order by rollforward.accounting_period
-        ), 0) as opening_break,
-        rollforward.closing_case_reserve - coalesce(claims_view.case_reserve_amount, 0)
-            as claims_subledger_break
+        rollforward.accounting_period,
+        rollforward.line_of_business,
+        rollforward.cost_category as measure,
+        'claims_mart' as check_name,
+        rollforward.closing_case_reserve - coalesce(claims_mart.case_reserve_amount, 0)
+            as break_amount
     from rollforward
-    left join claims_view
-        on rollforward.accounting_period = claims_view.accounting_period
-        and rollforward.line_of_business = claims_view.line_of_business
-        and rollforward.cost_category = claims_view.cost_category
+    left join claims_mart
+        on rollforward.accounting_period = claims_mart.accounting_period
+        and rollforward.line_of_business = claims_mart.line_of_business
+        and rollforward.cost_category = claims_mart.cost_category
+    where abs(rollforward.closing_case_reserve - coalesce(claims_mart.case_reserve_amount, 0))
+        > {{ accounting_reconciliation_tolerance() }}
 )
 
-select *
-from checked
-where abs(rollforward_break) > {{ accounting_reconciliation_tolerance() }}
-    or abs(opening_break) > {{ accounting_reconciliation_tolerance() }}
-    or abs(claims_subledger_break) > {{ accounting_reconciliation_tolerance() }}
-    or (
-        is_period_closed
-        and abs(coalesce(unexplained_difference, 0)) > {{ accounting_reconciliation_tolerance() }}
-    )
+select * from ledger_breaks
+union all
+select * from control_total_breaks
+union all
+select * from claims_mart_breaks

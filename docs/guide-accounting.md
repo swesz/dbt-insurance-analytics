@@ -69,6 +69,12 @@ The entries the subledgers send (source-systems.md 3h):
 A negative amount swaps the sides: a cancellation credits 1200 and debits 4000; a month that
 earns more than it writes lowers the UPR, debiting 2100 and crediting 4100.
 
+One simplification to know about: every recovery is posted to 5050, whatever its cost
+category. That is right for salvage and subrogation on a loss, and every recovery in this data
+is a loss recovery (309 of them). A recovered expense would belong against 5200 instead. The
+reconciliation would not flag the misposting, because the generator's ledger makes the same
+assumption; the comment in `int_accounting__subledger_postings` says what would.
+
 **Convention in every accounting model:** amounts are *signed*, debit positive and credit
 negative. An entry is two legs that sum to zero, a trial balance sums to zero, and the
 reconciliation is a subtraction whatever the account type. Reports that present a liability
@@ -105,7 +111,8 @@ and the reconciliation of that month would break. That is the test that catches 
 
 ## 4. What a reconciliation proves, and reconciling items
 
-`rpt_subledger_gl_reconciliation` compares, per closed period, line of business and account:
+`rpt_subledger_gl_reconciliation` compares, per closed period, line of business, account and
+source system:
 
 ```
 difference              = gl_amount - subledger_amount
@@ -117,13 +124,22 @@ A row at zero proves that the ledger's figure is fully supported by the detail: 
 posted twice, to the wrong line or account, or left out. It does not prove that the detail is
 right; the control-total tests in `tests/premium` and `tests/claims` check that.
 
+Why the source system is part of the row. Two accounts are fed by two systems: 1000 Cash by
+billing (customer cash) and claims (payments and recoveries), 1200 Premiums receivable by policy
+admin (written premium) and billing (collections). Compared per account only, a billing journal
+500.00 short and a claims journal 500.00 over in the same month cancel out, and the row shows
+MATCHED although two journals are wrong. Every ledger line names the system whose journal posted
+it (`source_system`: POLICY_ADMIN, BILLING, CLAIMS, or MANUAL for journals accountants post by
+hand), and every expected posting knows its system, so the reconciliation compares system by
+system and the same two errors show as two UNEXPLAINED rows.
+
 Not every difference is an error. An accountant may post a manual journal, or an interface may
 deliver an entry a month late. Those are **reconciling items**: a difference that is understood,
 correct, and documented. Each is a row in `seeds/gl_reconciling_items.csv`:
 
 | Column | Meaning |
 |---|---|
-| `accounting_period`, `account_number`, `line_of_business` | the reconciliation row it explains |
+| `accounting_period`, `account_number`, `line_of_business`, `source_system` | the reconciliation row it explains: the system is the journal that differs (MANUAL for a manual journal, CLAIMS for a claims interface item) |
 | `amount` | the amount by which the ledger differs from the subledger, signed like `difference` |
 | `item_type` | `MANUAL_JOURNAL`, `TIMING`, ... |
 | `explanation` | what happened, which journal, and when it reverses, in words a reviewer can check |
@@ -137,7 +153,11 @@ The rules that make this a control and not a fudge:
 3. A difference caused by a bug is fixed, never documented.
 
 `tests/accounting/assert_reconciliation_has_no_unexplained_difference.sql` fails the build if any
-row is unexplained by more than a cent.
+row is unexplained by any amount, even a cent. There is no tolerance
+(`macros/accounting_reconciliation_tolerance.sql` is zero): both sides are sums of two-decimal
+amounts kept as DECIMAL, so a correct reconciliation is exact, and a "within a penny" allowance
+would only hide the bugs that produce penny differences, such as a cents-to-dollars conversion
+done in floating point.
 
 ## 5. How to read the reports
 
@@ -157,10 +177,15 @@ opening UPR + written - earned = closing UPR          (the subledger ties)
 closing UPR = GL 2100 balance - documented items      (the ledger agrees)
 ```
 
-The first line is the premium subledger's own consistency. The second says the ledger's 2100,
-which only ever received the monthly "increase in UPR" postings, adds up to the liability the
-policies say we owe. Read across a row: the opening liability, what was added by selling
-coverage, what was released by providing it, and what is left.
+The first line is the premium subledger's own consistency: written, earned and closing are
+separate columns of `fct_premium_by_policy_period`, so it can fail (tests/premium checks it per
+policy and coverage). The opening is simply the prior row's closing, which is not tested
+because it cannot differ. The second line is the evidence: the ledger's 2100, which only ever
+received the monthly "increase in UPR" postings, adds up to the liability the policies say we
+owe. `assert_unearned_premium_rollforward_ties_to_gl.sql` also compares written, earned and
+closing UPR with the generator's control totals, computed in Python from its own records. Read
+across a row: the opening liability, what was added by selling coverage, what was released by
+providing it, and what is left.
 
 ### Case reserve rollforward (`rpt_loss_reserve_rollforward`)
 
@@ -174,6 +199,15 @@ unchanged: the cost was recognized when the reserve was set. A reserve increase 
 incurred although no money moved. Paid is net of recoveries, with voided payments reversed in
 the month of the void.
 
+Unlike the UPR rollforward, this one foots by definition: the report computes incurred as paid
+plus the change in reserve, and the opening as the closing minus that change, so "opening +
+incurred - paid = closing" cannot fail and is not tested. A test of it would look like evidence
+and prove nothing. What `assert_loss_reserve_rollforward_ties_to_gl.sql` checks instead is the
+closing reserve against the ledger's 2200 / 2300 in every closed period, and the closing
+reserve and paid against the generator's control totals. (It also compares the closing reserve
+with `fct_claim_exposure_period_balances`. Both are built from `int_claims__financial_events`,
+so that part checks aggregation and the incremental claims fact, not the booking.)
+
 ### Premium receivable and aging (`rpt_premium_receivable`, `rpt_premium_receivable_aging`)
 
 The ledger's 1200 is debited when premium is written and credited when cash arrives, so it holds
@@ -183,18 +217,37 @@ billed-and-due part (due installments minus cash) and the not-yet-due part (inst
 scheduled later).
 
 The aging needs to know which installments are still unpaid, but billing never links a payment
-to an installment. `int_accounting__installment_allocation` builds that link in three steps:
+to an installment. `int_accounting__installment_allocation` builds that link in four steps:
 
-1. Refunds use up credits. A credit installment (cancellation return premium, a credit
-   endorsement) lowers what the customer owes, unless billing paid it out as a refund; a
-   refunded credit is settled and must not lower anything else. Only refunds beyond the
-   credits reduce the cash.
-2. The remaining credits settle the latest installments first, because a cancellation removes
-   the end of the coverage.
-3. The policy's cash settles the oldest installments first (first in, first out).
+1. A reinstatement cancels its cancellation. Billing bills the cancellation's return premium
+   as a credit and the reinstatement as a debit of the same amount; the two offset each other
+   without cash (source-systems.md 3b). So the reinstatement debit is settled by the
+   cancellation credit of the same term, and that credit is used up.
+2. Refunds use up the credits that are left. A credit installment (a cancellation that was not
+   reversed, a credit endorsement) lowers what the customer owes, unless billing paid it out as
+   a refund; a refunded credit is settled and must not lower anything else. Only refunds beyond
+   the credits reduce the cash.
+3. The remaining credits settle the latest installments of their own term first, because a
+   cancellation removes the end of that term's coverage. Only a credit larger than everything
+   its term billed would go on to the rest of the policy.
+4. The policy's cash settles the oldest installments first (first in, first out).
 
 What is left open is aged by days past due. Over 90 days matters beyond collections: statutory
 accounting does not count such premium as an asset.
+
+Why step 1 and "own term first" matter. A first version pooled all credits per policy and
+treated a reinstatement debit like any other charge. A reinstated customer who then paid every
+installment on time (policy 16789, home: missed one installment in 2025-09, cancelled,
+reinstated, paid on schedule ever since) showed all of the 1,515.40 it owes as past due, most of
+it over 90 days: the cancellation credit had settled the renewal's installments, not yet due,
+and the reinstatement debit had used up cash that paid real installments. Total open did not
+change, so the tests that tie the aging to the receivable and the ledger could not see it.
+`assert_aging_shows_nothing_past_due_for_paid_up_policies.sql` now checks the buckets
+themselves: it finds, from billing directly, the policies that have paid everything due and
+have no credit left to allocate, and requires that none of them shows money past due. On the
+default load the fix lowered total past due from 176,638.86 to 131,111.01, and the policies
+with a reinstatement showing anything past due from 82 to 7 (each of those 7 has a genuinely
+unpaid installment).
 
 ## 6. A worked example
 
@@ -248,7 +301,8 @@ collected 300.00. Receivable (GL view) 300.00 = billed-and-due receivable 0.00 +
 **A reconciling item.** Suppose the claims interface had sent the March payment in April. The
 ledger's March 5000 would be 1,000.00 short and April's 1,000.00 over. The reconciliation shows
 a difference of -1,000.00 on 2024-03 / 5000 and +1,000.00 on 2024-04 / 5000 (and the opposite
-on 1000). With four rows in the reconciling-items seed, one per period and account, all four
+on 1000). With four rows in the reconciling-items seed, one per period and account, each with
+source system CLAIMS (the journal that was short, then over), all four
 rows become EXPLAINED. The case reserve rollforward is unaffected, because only the payment was
 late: the erosion is a reserve posting, and it went through on time. Section 7 shows that this
 is exactly what happened in this data set.
@@ -257,17 +311,24 @@ is exactly what happened in this data set.
 
 On the default load (valuation 2026-09-30), the ledger has exports for 56 closed periods,
 2022-01 to 2026-08; 2026-09 is still open, so the reports show subledger figures for it and
-null GL columns. Of 1,344 reconciliation rows, 1,338 are MATCHED and 6 are EXPLAINED by the
-items in `seeds/gl_reconciling_items.csv`:
+null GL columns. Of 1,570 reconciliation rows (448 POLICY_ADMIN, 224 BILLING, 896 CLAIMS and 2
+MANUAL), 1,564 are MATCHED and 6 are EXPLAINED by the items in
+`seeds/gl_reconciling_items.csv`; none is UNEXPLAINED:
 
-| Period | Account | Line | Difference (GL - subledger) | Item |
-|---|---|---|---|---|
-| 2024-06 | 4000 | AUTO | +25,523.10 | manual journal JE-2024-06-0007 moved written premium from AUTO to HOME |
-| 2024-06 | 4000 | HOME | -25,523.10 | the other side of the same journal |
-| 2025-08 | 5000 | AUTO | -11,926.78 | five AUTO loss payments entered on Sunday 2025-08-31, booked in 2025-08, that the claims interface did not send at the close |
-| 2025-08 | 1000 | AUTO | +11,926.78 | their cash side |
-| 2025-09 | 5000 | AUTO | +11,926.78 | the same payments, posted in 2025-09 |
-| 2025-09 | 1000 | AUTO | -11,926.78 | their cash side |
+| Period | Account | Line | Source | Difference (GL - subledger) | Item |
+|---|---|---|---|---|---|
+| 2024-06 | 4000 | AUTO | MANUAL | +25,523.10 | manual journal JE-2024-06-0007 moved written premium from AUTO to HOME |
+| 2024-06 | 4000 | HOME | MANUAL | -25,523.10 | the other side of the same journal |
+| 2025-08 | 5000 | AUTO | CLAIMS | -11,926.78 | five AUTO loss payments entered on Sunday 2025-08-31, booked in 2025-08, that the claims interface did not send at the close |
+| 2025-08 | 1000 | AUTO | CLAIMS | +11,926.78 | their cash side |
+| 2025-09 | 5000 | AUTO | CLAIMS | +11,926.78 | the same payments, posted in 2025-09 |
+| 2025-09 | 1000 | AUTO | CLAIMS | -11,926.78 | their cash side |
+
+The six differences equal, to the cent, the reconciling items the generator says it planted
+(`data/generated/gl_reconciling_items_expected.csv`), and no other row has a difference. With
+the source system in the row, the reclass now sits on its own MANUAL rows (the POLICY_ADMIN
+4000 rows of 2024-06 are MATCHED), and the timing item on CLAIMS 1000 (BILLING 1000 of 2025-08
+is MATCHED).
 
 How each was found. The reconciliation showed the six rows; for the reclass, the ledger had a
 two-line MANUAL journal of exactly 25,523.10 and no subledger has manual journals. For the
@@ -290,8 +351,9 @@ Two other things the ledger checks turned up:
   which stays DECIMAL), and every term ties to the cent. This is the rule from section 4 in
   practice: a difference caused by a bug is fixed, never documented.
 
-The rollforwards agree with the ledger in every closed period, and with the generator's own
-control totals. For 2025-08, AUTO: UPR 4,009,500.90 + 1,170,585.42 written - 1,042,830.87
+The rollforwards' closing balances agree with the ledger in every closed period, and their
+written, earned, paid and closing figures with the generator's own control totals in every
+period. For 2025-08, AUTO: UPR 4,009,500.90 + 1,170,585.42 written - 1,042,830.87
 earned = 4,137,255.45, equal to the ledger's 2100 balance; case reserve (LOSS) 2,831,097.88 +
 757,524.00 incurred - 403,479.85 paid = 3,185,142.03, equal to the ledger's 2200 balance.
 

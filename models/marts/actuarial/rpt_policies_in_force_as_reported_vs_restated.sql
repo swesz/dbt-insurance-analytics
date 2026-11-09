@@ -16,7 +16,8 @@
 -- Restated PIF is 10,000 + 12 + 3 - 9 = 10,006, a difference of +6, and the main driver is
 -- TERM_ENTERED_AFTER_CLOSE.
 --
--- Periods before the snapshot history starts have no as-reported figure (null), see
+-- Periods before the snapshot history starts have no as-reported figure (null), and neither
+-- has the valuation period, whose books close after the valuation date; see
 -- fct_policy_in_force_at_close.
 with periods as (
     select * from {{ ref('dim_accounting_periods') }}

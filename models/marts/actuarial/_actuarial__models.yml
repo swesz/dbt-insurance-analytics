@@ -10,19 +10,14 @@ models:
       through the valuation period: earned premium, net paid loss, change in the case loss
       reserve, calendar-period incurred loss (split into catastrophe and non-catastrophe by the
       claim's catastrophe flag), loss ratio, and LAE paid, incurred and ratios.
+    # No identity tests (incurred = paid + reserve change, catastrophe + non-catastrophe =
+    # total, the same for LAE): the model computes incurred and non-catastrophe incurred exactly
+    # that way, so they could never fail. The figures are checked against marts the report is
+    # not built from (tests/actuarial/assert_loss_ratio_*).
     data_tests:
       - dbt_utils.unique_combination_of_columns:
           arguments:
             combination_of_columns: ['accounting_period', 'line_of_business']
-      - dbt_utils.expression_is_true:
-          arguments:
-            expression: "incurred_loss_amount = net_paid_loss_amount + change_in_case_loss_reserve_amount"
-      - dbt_utils.expression_is_true:
-          arguments:
-            expression: "incurred_loss_amount = catastrophe_incurred_loss_amount + non_catastrophe_incurred_loss_amount"
-      - dbt_utils.expression_is_true:
-          arguments:
-            expression: "incurred_lae_amount = paid_lae_amount + change_in_case_lae_reserve_amount"
     columns:
       - name: accounting_period
         description: Accounting period ('YYYY-MM').
@@ -173,8 +168,9 @@ models:
       Claim frequency, average incurred severity and pure premium per accident year, line of
       business and coverage, with catastrophe claims excluded (is_catastrophe_included = false)
       and included (true). Earned exposure is attributed to a coverage when the policy earned
-      premium on it in the month; claims are claim exposures on matched policies with a loss
-      inside a term.
+      premium on it in the month; claims are distinct claims with an exposure on the coverage,
+      on matched policies with a loss inside a term. Frequency and severity are per claim;
+      claimant_frequency counts claimants (claim exposures) instead.
     data_tests:
       - dbt_utils.unique_combination_of_columns:
           arguments:
@@ -216,11 +212,13 @@ models:
               arguments:
                 min_value: 0
       - name: claim_exposure_count
-        description: Claim exposures on the coverage (one per claim and claimant); the frequency numerator.
+        description: >
+          Claim exposures on the coverage, one per claim and claimant: the number of claimants.
+          The numerator of claimant_frequency.
         data_tests:
           - not_null
       - name: claim_count
-        description: Distinct claims with an exposure on the coverage.
+        description: Distinct claims with an exposure on the coverage; the numerator of claim_frequency and the denominator of severity.
         data_tests:
           - not_null
       - name: incurred_loss_amount
@@ -228,9 +226,13 @@ models:
         data_tests:
           - not_null
       - name: claim_frequency
-        description: claim_exposure_count / earned_exposure_years.
+        description: claim_count / earned_exposure_years, claims per exposure year (null without exposure).
+      - name: claimant_frequency
+        description: >
+          claim_exposure_count / earned_exposure_years, claimants per exposure year. Above
+          claim_frequency where claims have several claimants on the coverage (mostly BI).
       - name: average_incurred_severity
-        description: incurred_loss_amount / claim_exposure_count.
+        description: incurred_loss_amount / claim_count, incurred loss per claim (null without claims).
       - name: pure_premium
         description: incurred_loss_amount / earned_exposure_years = frequency x severity.
       - name: earned_premium
@@ -243,18 +245,17 @@ models:
       One row per real policy and accounting period in which the policy was in force at the
       period end as reported at the close (the snap_policy_terms version current at the end
       of close_date, rule 3e) or as restated today (fct_policy_month_end), with the reason when
-      the two differ. Only periods whose close the snapshot recorded.
+      the two differ. Only periods closed by the valuation date whose close the snapshot
+      recorded.
+    # Not tested, because the model guarantees them: every row is in force on at least one side
+    # (it is a full outer join of the two in-force sets), and a row has a reason exactly when
+    # the statuses differ (the case expression ends in 'OTHER'). The evidence is
+    # tests/actuarial/assert_pif_as_reported_equals_restated_when_unchanged.sql, which compares
+    # the snapshot with the current terms directly.
     data_tests:
       - dbt_utils.unique_combination_of_columns:
           arguments:
             combination_of_columns: ['policy_id', 'accounting_period']
-      - dbt_utils.expression_is_true:
-          arguments:
-            expression: "is_in_force_as_reported or is_in_force_restated"
-      # A reason exactly when the two statuses differ.
-      - dbt_utils.expression_is_true:
-          arguments:
-            expression: "(restatement_reason is null) = (is_in_force_as_reported = is_in_force_restated)"
     columns:
       - name: policy_period_key
         description: Surrogate key of policy_id and accounting_period.
@@ -310,23 +311,17 @@ models:
       - dbt_utils.unique_combination_of_columns:
           arguments:
             combination_of_columns: ['accounting_period', 'line_of_business']
-      # The difference is fully explained by the policies added and dropped since the close,
-      # and every added or dropped policy has exactly one reason.
+      # The difference is fully explained by the policies added and dropped since the close.
+      # Not a tautology: the restated count comes from fct_policy_month_end directly, the
+      # added and dropped counts from fct_policy_in_force_at_close, so this fails if the fact
+      # loses an in-force policy or files it under another line of business. (That every added
+      # or dropped policy has exactly one reason, and that has_as_reported matches a non-null
+      # count, follow from how the columns are computed and are not tested.)
       - dbt_utils.expression_is_true:
           arguments:
             expression: "policies_in_force_difference = policies_added_after_close - policies_dropped_after_close"
           config:
             where: "has_as_reported"
-      - dbt_utils.expression_is_true:
-          arguments:
-            expression: >-
-              policies_added_after_close + policies_dropped_after_close
-              = term_entered_after_close_count + reinstated_after_close_count
-              + cancelled_after_close_count + term_removed_after_close_count
-              + other_restatement_count
-      - dbt_utils.expression_is_true:
-          arguments:
-            expression: "has_as_reported = (policies_in_force_as_reported is not null)"
     columns:
       - name: accounting_period
         description: Accounting period.
@@ -348,7 +343,10 @@ models:
       - name: close_date
         description: The period's close date; as reported means as known at its end.
       - name: has_as_reported
-        description: True when the snapshot history covers the period's close.
+        description: >
+          True when the period had closed by the valuation date and the snapshot history covers
+          its close; false for the valuation period (its close date is later) and for periods
+          before the history starts.
         data_tests:
           - not_null
       - name: policies_in_force_as_reported

@@ -74,16 +74,16 @@ models:
   - name: int_accounting__subledger_postings
     description: >
       The GL postings the subledgers imply, per accounting period x line of business x GL
-      account, as signed amounts (debit positive, credit negative), following the posting table
-      in docs/source-systems.md 3h. Covers every period with subledger activity, including the
-      open valuation period.
+      account x source system, as signed amounts (debit positive, credit negative), following
+      the posting table in docs/source-systems.md 3h. Covers every period with subledger
+      activity, including the open valuation period.
     data_tests:
       - dbt_utils.unique_combination_of_columns:
           arguments:
-            combination_of_columns: ['accounting_period', 'line_of_business', 'account_number']
+            combination_of_columns: ['accounting_period', 'line_of_business', 'account_number', 'source_system']
     columns:
       - name: posting_key
-        description: "Primary key: 'period|line_of_business|account_number'."
+        description: "Primary key: 'period|line_of_business|account_number|source_system'."
         data_tests:
           - unique
           - not_null
@@ -110,10 +110,16 @@ models:
               arguments:
                 to: ref('gl_accounts')
                 field: account_number
-      - name: source_systems
-        description: The subledgers that feed the row, comma-separated.
+      - name: source_system
+        description: >
+          The subledger whose journal carries the posting (POLICY_ADMIN, BILLING or CLAIMS), as
+          the ledger's source_system column names it. 1000 has a BILLING and a CLAIMS row, 1200
+          a POLICY_ADMIN and a BILLING row.
         data_tests:
           - not_null
+          - accepted_values:
+              arguments:
+                values: ['POLICY_ADMIN', 'BILLING', 'CLAIMS']
       - name: subledger_amount
         description: Signed amount the ledger should hold for the row.
         data_tests:
@@ -167,7 +173,7 @@ models:
       - name: gl_itd_balance_amount
         description: GL balance at the period end (running sum of activity); null without a ledger export.
       - name: documented_items_amount
-        description: Documented reconciling items of the period (seeds/gl_reconciling_items.csv).
+        description: Documented reconciling items of the period (seeds/gl_reconciling_items.csv), summed over source systems.
         data_tests:
           - not_null
       - name: documented_items_itd_amount
@@ -179,16 +185,16 @@ models:
     description: >
       Each positive installment of a real policy's transaction booked by the valuation period,
       with the credit and cash applied to it and the amount still open at the valuation date.
-      Credits not paid out as refunds settle the policy's latest-due installments first; cash
-      settles its oldest-due installments first. See the model header for the reasoning.
-    data_tests:
-      # Nothing is over-applied: credit + cash applied never exceed the installment.
-      - dbt_utils.expression_is_true:
-          arguments:
-            expression: "credit_applied_amount + cash_applied_amount <= installment_amount"
-      - dbt_utils.expression_is_true:
-          arguments:
-            expression: "open_amount >= 0 and credit_applied_amount >= 0 and cash_applied_amount >= 0"
+      A reinstatement debit is settled by the cancellation credit of its own term, which it
+      reverses. Credits that are left and not paid out as refunds settle the latest-due
+      installments of their own term first, and only then of the rest of the policy; cash
+      settles the policy's oldest-due installments first. See the model header for the
+      reasoning.
+    # No row-level identity tests (nothing over-applied, nothing negative): every step caps what
+    # it applies with greatest(0, least(remaining, ...)), so they would hold whatever the pools
+    # held. The unit tests below check the allocation with numbers worked by hand, and
+    # tests/accounting/assert_aging_shows_nothing_past_due_for_paid_up_policies.sql checks its
+    # result against billing.
     columns:
       - name: installment_id
         description: Primary key.
@@ -211,6 +217,14 @@ models:
         description: The policy transaction billed.
         data_tests:
           - not_null
+      - name: transaction_type
+        description: Type of the transaction billed (NEW_BUSINESS, RENEWAL, ENDORSEMENT, REINSTATEMENT).
+        data_tests:
+          - not_null
+          # A cancellation only ever returns premium, so it never bills a positive installment.
+          - accepted_values:
+              arguments:
+                values: ['NEW_BUSINESS', 'RENEWAL', 'ENDORSEMENT', 'REINSTATEMENT']
       - name: installment_number
         description: 1..n within the transaction.
       - name: due_date
@@ -221,8 +235,18 @@ models:
         description: The installment, in dollars (always positive here).
         data_tests:
           - not_null
+      - name: reversed_amount
+        description: >
+          Part of a reinstatement installment settled by the cancellation credit of the same
+          term, which the reinstatement reverses; zero on every other installment. Included in
+          credit_applied_amount.
+        data_tests:
+          - not_null
       - name: credit_applied_amount
-        description: Part settled by the term's credits.
+        description: >
+          Part settled by credits: the reversal (reversed_amount), then the credits of the
+          installment's own term that were not refunded, then any such credit another term of
+          the policy could not use.
         data_tests:
           - not_null
       - name: cash_applied_amount
@@ -278,10 +302,10 @@ unit_tests:
           - {installment_id: 14, policy_id: 2, term_id: 20, transaction_id: 201, installment_number: 1, due_date: '2026-08-15', installment_amount: -50.00, is_test_policy: false}
       - input: ref('fct_policy_transaction_lines')
         rows:
-          - {transaction_id: 100, accounting_period: '2026-03'}
-          - {transaction_id: 101, accounting_period: '2026-06'}
-          - {transaction_id: 200, accounting_period: '2026-07'}
-          - {transaction_id: 201, accounting_period: '2026-08'}
+          - {transaction_id: 100, transaction_type: NEW_BUSINESS, accounting_period: '2026-03'}
+          - {transaction_id: 101, transaction_type: CANCELLATION, accounting_period: '2026-06'}
+          - {transaction_id: 200, transaction_type: NEW_BUSINESS, accounting_period: '2026-07'}
+          - {transaction_id: 201, transaction_type: ENDORSEMENT, accounting_period: '2026-08'}
       - input: ref('int_accounting__billing_cash_events')
         rows:
           - {policy_id: 1, cash_event_type: RECEIPT, cash_amount: 100.00}
@@ -303,3 +327,106 @@ unit_tests:
         - {installment_id: 11, credit_applied_amount: 0.00, cash_applied_amount: 100.00, open_amount: 0.00, days_past_due: 91}
         - {installment_id: 12, credit_applied_amount: 0.00, cash_applied_amount: 100.00, open_amount: 0.00, days_past_due: 60}
         - {installment_id: 13, credit_applied_amount: 0.00, cash_applied_amount: 0.00, open_amount: 100.00, days_past_due: -1}
+
+  # Reversals, and credits staying in their own term. Valuation date 2026-09-30.
+  #   Policy 3: a 6-month term, 6 x 100.00 due on the 1st of 2026-03 .. 2026-08. The customer
+  #   missed 2026-05-01; the term was cancelled for nonpayment effective 2026-05-21 (-335.87
+  #   credit) and reinstated on 2026-05-28 (+335.87 debit, due 2026-06-17), when the customer
+  #   paid the missed installment. Everything else was paid on time, including the first
+  #   installment of the renewal (6 x 100.00 due on the 1st of 2026-09 .. 2027-02).
+  #     Step 1: the reinstatement debit is settled by the cancellation credit; nothing is left
+  #     of either. Step 4: cash 700 settles the seven installments due by 2026-09-01.
+  #     Nothing is past due; the renewal's last five installments are open and not yet due.
+  #   Treated as ordinary items instead, the credit would settle the renewal's last
+  #   installments and the debit would eat 300.00 of cash: 335.87 would look past due.
+  #   Policy 4: a term of 3 x 100.00 (2026-04-01 .. 06-01) with a -60.00 credit endorsement
+  #   that billing did not refund; the customer paid 100, 100 and 40. Its renewal, 4 x 100.00
+  #   (2026-07-01 .. 10-01), is paid through 2026-09-01.
+  #     Step 3: the credit settles 60.00 of its own term's last installment (2026-06-01).
+  #     Step 4: cash 540 settles the rest of the term and the renewal through 2026-09-01.
+  #     Nothing is past due; 2026-10-01 is open and not yet due.
+  #   Applied to the policy's latest installment instead, the credit would settle 60.00 of
+  #   2026-10-01, and 60.00 of 2026-09-01 would look past due.
+  - name: test_installment_allocation_reversal_and_own_term_credit
+    description: >
+      A reinstatement is settled by the cancellation credit it reverses, so a reinstated
+      customer who paid on time shows nothing past due; a credit settles its own term before
+      any other.
+    model: int_accounting__installment_allocation
+    overrides:
+      vars:
+        valuation_date: '2026-09-30'
+    given:
+      - input: ref('stg_billing__installments')
+        rows:
+          - {installment_id: 31, policy_id: 3, term_id: 30, transaction_id: 300, installment_number: 1, due_date: '2026-03-01', installment_amount: 100.00, is_test_policy: false}
+          - {installment_id: 32, policy_id: 3, term_id: 30, transaction_id: 300, installment_number: 2, due_date: '2026-04-01', installment_amount: 100.00, is_test_policy: false}
+          - {installment_id: 33, policy_id: 3, term_id: 30, transaction_id: 300, installment_number: 3, due_date: '2026-05-01', installment_amount: 100.00, is_test_policy: false}
+          - {installment_id: 34, policy_id: 3, term_id: 30, transaction_id: 300, installment_number: 4, due_date: '2026-06-01', installment_amount: 100.00, is_test_policy: false}
+          - {installment_id: 35, policy_id: 3, term_id: 30, transaction_id: 300, installment_number: 5, due_date: '2026-07-01', installment_amount: 100.00, is_test_policy: false}
+          - {installment_id: 36, policy_id: 3, term_id: 30, transaction_id: 300, installment_number: 6, due_date: '2026-08-01', installment_amount: 100.00, is_test_policy: false}
+          - {installment_id: 37, policy_id: 3, term_id: 30, transaction_id: 301, installment_number: 1, due_date: '2026-05-21', installment_amount: -335.87, is_test_policy: false}
+          - {installment_id: 38, policy_id: 3, term_id: 30, transaction_id: 302, installment_number: 1, due_date: '2026-06-17', installment_amount: 335.87, is_test_policy: false}
+          - {installment_id: 41, policy_id: 3, term_id: 31, transaction_id: 310, installment_number: 1, due_date: '2026-09-01', installment_amount: 100.00, is_test_policy: false}
+          - {installment_id: 42, policy_id: 3, term_id: 31, transaction_id: 310, installment_number: 2, due_date: '2026-10-01', installment_amount: 100.00, is_test_policy: false}
+          - {installment_id: 43, policy_id: 3, term_id: 31, transaction_id: 310, installment_number: 3, due_date: '2026-11-01', installment_amount: 100.00, is_test_policy: false}
+          - {installment_id: 44, policy_id: 3, term_id: 31, transaction_id: 310, installment_number: 4, due_date: '2026-12-01', installment_amount: 100.00, is_test_policy: false}
+          - {installment_id: 45, policy_id: 3, term_id: 31, transaction_id: 310, installment_number: 5, due_date: '2027-01-01', installment_amount: 100.00, is_test_policy: false}
+          - {installment_id: 46, policy_id: 3, term_id: 31, transaction_id: 310, installment_number: 6, due_date: '2027-02-01', installment_amount: 100.00, is_test_policy: false}
+          - {installment_id: 51, policy_id: 4, term_id: 40, transaction_id: 400, installment_number: 1, due_date: '2026-04-01', installment_amount: 100.00, is_test_policy: false}
+          - {installment_id: 52, policy_id: 4, term_id: 40, transaction_id: 400, installment_number: 2, due_date: '2026-05-01', installment_amount: 100.00, is_test_policy: false}
+          - {installment_id: 53, policy_id: 4, term_id: 40, transaction_id: 400, installment_number: 3, due_date: '2026-06-01', installment_amount: 100.00, is_test_policy: false}
+          - {installment_id: 54, policy_id: 4, term_id: 40, transaction_id: 401, installment_number: 1, due_date: '2026-05-15', installment_amount: -60.00, is_test_policy: false}
+          - {installment_id: 55, policy_id: 4, term_id: 41, transaction_id: 410, installment_number: 1, due_date: '2026-07-01', installment_amount: 100.00, is_test_policy: false}
+          - {installment_id: 56, policy_id: 4, term_id: 41, transaction_id: 410, installment_number: 2, due_date: '2026-08-01', installment_amount: 100.00, is_test_policy: false}
+          - {installment_id: 57, policy_id: 4, term_id: 41, transaction_id: 410, installment_number: 3, due_date: '2026-09-01', installment_amount: 100.00, is_test_policy: false}
+          - {installment_id: 58, policy_id: 4, term_id: 41, transaction_id: 410, installment_number: 4, due_date: '2026-10-01', installment_amount: 100.00, is_test_policy: false}
+      - input: ref('fct_policy_transaction_lines')
+        rows:
+          - {transaction_id: 300, transaction_type: NEW_BUSINESS, accounting_period: '2026-03'}
+          - {transaction_id: 301, transaction_type: CANCELLATION, accounting_period: '2026-05'}
+          - {transaction_id: 302, transaction_type: REINSTATEMENT, accounting_period: '2026-05'}
+          - {transaction_id: 310, transaction_type: RENEWAL, accounting_period: '2026-08'}
+          - {transaction_id: 400, transaction_type: NEW_BUSINESS, accounting_period: '2026-04'}
+          - {transaction_id: 401, transaction_type: ENDORSEMENT, accounting_period: '2026-05'}
+          - {transaction_id: 410, transaction_type: RENEWAL, accounting_period: '2026-06'}
+      - input: ref('int_accounting__billing_cash_events')
+        rows:
+          - {policy_id: 3, cash_event_type: RECEIPT, cash_amount: 100.00}
+          - {policy_id: 3, cash_event_type: RECEIPT, cash_amount: 100.00}
+          - {policy_id: 3, cash_event_type: RECEIPT, cash_amount: 100.00}
+          - {policy_id: 3, cash_event_type: RECEIPT, cash_amount: 100.00}
+          - {policy_id: 3, cash_event_type: RECEIPT, cash_amount: 100.00}
+          - {policy_id: 3, cash_event_type: RECEIPT, cash_amount: 100.00}
+          - {policy_id: 3, cash_event_type: RECEIPT, cash_amount: 100.00}
+          - {policy_id: 4, cash_event_type: RECEIPT, cash_amount: 100.00}
+          - {policy_id: 4, cash_event_type: RECEIPT, cash_amount: 100.00}
+          - {policy_id: 4, cash_event_type: RECEIPT, cash_amount: 40.00}
+          - {policy_id: 4, cash_event_type: RECEIPT, cash_amount: 100.00}
+          - {policy_id: 4, cash_event_type: RECEIPT, cash_amount: 100.00}
+          - {policy_id: 4, cash_event_type: RECEIPT, cash_amount: 100.00}
+      - input: ref('dim_accounting_periods')
+        rows:
+          - {accounting_period: '2026-09', is_valuation_period: true}
+    expect:
+      rows:
+        - {installment_id: 31, reversed_amount: 0.00, credit_applied_amount: 0.00, cash_applied_amount: 100.00, open_amount: 0.00, days_past_due: 213}
+        - {installment_id: 32, reversed_amount: 0.00, credit_applied_amount: 0.00, cash_applied_amount: 100.00, open_amount: 0.00, days_past_due: 182}
+        - {installment_id: 33, reversed_amount: 0.00, credit_applied_amount: 0.00, cash_applied_amount: 100.00, open_amount: 0.00, days_past_due: 152}
+        - {installment_id: 34, reversed_amount: 0.00, credit_applied_amount: 0.00, cash_applied_amount: 100.00, open_amount: 0.00, days_past_due: 121}
+        - {installment_id: 35, reversed_amount: 0.00, credit_applied_amount: 0.00, cash_applied_amount: 100.00, open_amount: 0.00, days_past_due: 91}
+        - {installment_id: 36, reversed_amount: 0.00, credit_applied_amount: 0.00, cash_applied_amount: 100.00, open_amount: 0.00, days_past_due: 60}
+        - {installment_id: 38, reversed_amount: 335.87, credit_applied_amount: 335.87, cash_applied_amount: 0.00, open_amount: 0.00, days_past_due: 105}
+        - {installment_id: 41, reversed_amount: 0.00, credit_applied_amount: 0.00, cash_applied_amount: 100.00, open_amount: 0.00, days_past_due: 29}
+        - {installment_id: 42, reversed_amount: 0.00, credit_applied_amount: 0.00, cash_applied_amount: 0.00, open_amount: 100.00, days_past_due: -1}
+        - {installment_id: 43, reversed_amount: 0.00, credit_applied_amount: 0.00, cash_applied_amount: 0.00, open_amount: 100.00, days_past_due: -32}
+        - {installment_id: 44, reversed_amount: 0.00, credit_applied_amount: 0.00, cash_applied_amount: 0.00, open_amount: 100.00, days_past_due: -62}
+        - {installment_id: 45, reversed_amount: 0.00, credit_applied_amount: 0.00, cash_applied_amount: 0.00, open_amount: 100.00, days_past_due: -93}
+        - {installment_id: 46, reversed_amount: 0.00, credit_applied_amount: 0.00, cash_applied_amount: 0.00, open_amount: 100.00, days_past_due: -124}
+        - {installment_id: 51, reversed_amount: 0.00, credit_applied_amount: 0.00, cash_applied_amount: 100.00, open_amount: 0.00, days_past_due: 182}
+        - {installment_id: 52, reversed_amount: 0.00, credit_applied_amount: 0.00, cash_applied_amount: 100.00, open_amount: 0.00, days_past_due: 152}
+        - {installment_id: 53, reversed_amount: 0.00, credit_applied_amount: 60.00, cash_applied_amount: 40.00, open_amount: 0.00, days_past_due: 121}
+        - {installment_id: 55, reversed_amount: 0.00, credit_applied_amount: 0.00, cash_applied_amount: 100.00, open_amount: 0.00, days_past_due: 91}
+        - {installment_id: 56, reversed_amount: 0.00, credit_applied_amount: 0.00, cash_applied_amount: 100.00, open_amount: 0.00, days_past_due: 60}
+        - {installment_id: 57, reversed_amount: 0.00, credit_applied_amount: 0.00, cash_applied_amount: 100.00, open_amount: 0.00, days_past_due: 29}
+        - {installment_id: 58, reversed_amount: 0.00, credit_applied_amount: 0.00, cash_applied_amount: 0.00, open_amount: 100.00, days_past_due: -1}

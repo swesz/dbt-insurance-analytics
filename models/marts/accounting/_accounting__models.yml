@@ -4,26 +4,24 @@ models:
   - name: rpt_subledger_gl_reconciliation
     description: >
       Subledger-to-GL reconciliation per closed accounting period x line of business x GL
-      account: the amount the subledgers imply, the amount in the ledger, the difference, the
-      documented reconciling items (seeds/gl_reconciling_items.csv) and what is left
-      unexplained, with a status. Signed debit positive. Contract enforced: the close checklist
-      and the reconciliation test depend on its shape.
+      account x source system: the amount the subledgers imply, the amount in the ledger, the
+      difference, the documented reconciling items (seeds/gl_reconciling_items.csv) and what is
+      left unexplained, with a status. Per source system because 1000 and 1200 are each fed by
+      two systems, whose errors could otherwise offset. Signed debit positive. Contract
+      enforced: the close checklist and the reconciliation test depend on its shape.
     config:
       contract:
         enforced: true
+    # No identity tests on difference = gl - subledger or unexplained = difference - documented:
+    # the model computes the columns that way, so such tests could never fail. The evidence is
+    # tests/accounting/assert_reconciliation_has_no_unexplained_difference.sql.
     data_tests:
       - dbt_utils.unique_combination_of_columns:
           arguments:
-            combination_of_columns: ['accounting_period', 'line_of_business', 'account_number']
-      - dbt_utils.expression_is_true:
-          arguments:
-            expression: "difference = gl_amount - subledger_amount"
-      - dbt_utils.expression_is_true:
-          arguments:
-            expression: "unexplained_difference = difference - documented_items_amount"
+            combination_of_columns: ['accounting_period', 'line_of_business', 'account_number', 'source_system']
     columns:
       - name: reconciliation_key
-        description: "Primary key: 'period|line_of_business|account_number'."
+        description: "Primary key: 'period|line_of_business|account_number|source_system'."
         data_type: varchar
         constraints:
           - type: not_null
@@ -59,6 +57,17 @@ models:
               arguments:
                 to: ref('gl_accounts')
                 field: account_number
+      - name: source_system
+        description: >
+          The system whose journal the row compares: POLICY_ADMIN, BILLING or CLAIMS (a
+          subledger), or MANUAL (journals posted by accountants, which no subledger has).
+        data_type: varchar
+        constraints:
+          - type: not_null
+        data_tests:
+          - accepted_values:
+              arguments:
+                values: ['POLICY_ADMIN', 'BILLING', 'CLAIMS', 'MANUAL']
       - name: account_name
         description: Account name from seeds/gl_accounts.csv.
         data_type: varchar
@@ -118,16 +127,13 @@ models:
     config:
       contract:
         enforced: true
+    # Debits = credits is checked across accounts in
+    # tests/accounting/assert_trial_balance_balances.sql. Per-row identities (net = debit -
+    # credit, a balance only for balance sheet accounts) restate how the columns are computed.
     data_tests:
       - dbt_utils.unique_combination_of_columns:
           arguments:
             combination_of_columns: ['accounting_period', 'account_number', 'line_of_business']
-      - dbt_utils.expression_is_true:
-          arguments:
-            expression: "net_activity_amount = debit_amount - credit_amount"
-      - dbt_utils.expression_is_true:
-          arguments:
-            expression: "(itd_balance_amount is null) = (statement = 'INCOME_STATEMENT')"
     columns:
       - name: trial_balance_key
         description: "Primary key: 'period|account_number|line_of_business'."
@@ -356,9 +362,10 @@ models:
       - dbt_utils.unique_combination_of_columns:
           arguments:
             combination_of_columns: ['accounting_period', 'line_of_business']
-      - dbt_utils.expression_is_true:
-          arguments:
-            expression: "receivable_amount = billed_due_receivable_amount + not_yet_due_amount"
+    # receivable = billed-and-due part + not-yet-due part holds by algebra ((W - C) = (B - C) +
+    # (W - B)), so it is not tested. The receivable is checked against the ledger's 1200 and
+    # against the aging, which is built from billing installments instead of written premium
+    # (tests/accounting/assert_premium_receivable_ties_to_gl_and_aging.sql).
     columns:
       - name: receivable_key
         description: "Primary key: 'period|line_of_business'."
@@ -401,7 +408,11 @@ models:
         data_tests:
           - not_null
       - name: not_yet_due_amount
-        description: itd_written_premium - itd_billed_due_amount, installments due later.
+        description: >
+          itd_written_premium - itd_billed_due_amount: premium written whose installments fall
+          due after the period end, gross (before any cash is allocated, so cash paid ahead does
+          not lower it; it shows in billed_due_receivable_amount instead). Not the same as the
+          aging's open_not_yet_due_amount, which is net of allocated cash and credits.
         data_tests:
           - not_null
       - name: is_period_closed
@@ -421,15 +432,16 @@ models:
     description: >
       Premium receivable aging at the valuation date, one row per real policy with billing or
       cash: receivable (billed - collected) split into current and 1-30, 31-60, 61-90 and over
-      90 days past due, after allocating credits not paid out as refunds (latest-due first)
-      and cash (oldest-due first) to the policy's installments; plus unapplied credit.
+      90 days past due, after allocating credits and cash to the policy's installments
+      (int_accounting__installment_allocation: a reinstatement settled by the cancellation it
+      reverses, credits not paid out as refunds latest-due first within their own term, cash
+      oldest-due first); plus unapplied credit.
+    # "The buckets add up to the receivable" is not tested: unapplied_credit_amount is defined as
+    # the receivable minus the open buckets, so it would hold whatever the allocation did. The
+    # two tests below can fail, and so can
+    # tests/accounting/assert_aging_shows_nothing_past_due_for_paid_up_policies.sql, which checks
+    # the buckets themselves.
     data_tests:
-      # The buckets add up to the receivable.
-      - dbt_utils.expression_is_true:
-          arguments:
-            expression: >
-              receivable_amount = current_amount + past_due_1_30_amount + past_due_31_60_amount
-              + past_due_61_90_amount + past_due_over_90_amount + unapplied_credit_amount
       # The allocation check: money left over can only be a credit, and only once nothing is
       # open. A positive unapplied amount would mean refunds larger than what was paid.
       - dbt_utils.expression_is_true:
@@ -479,8 +491,12 @@ models:
         description: Open installments not past due (due on or after the valuation date).
         data_tests:
           - not_null
-      - name: not_yet_due_amount
-        description: The part of current_amount due after the valuation date.
+      - name: open_not_yet_due_amount
+        description: >
+          The part of current_amount due after the valuation date: installments scheduled later
+          that are still open after credits and cash were allocated (net). Unlike
+          rpt_premium_receivable.not_yet_due_amount (gross: written minus billed and due), cash
+          paid ahead of the due date lowers it.
         data_tests:
           - not_null
       - name: past_due_1_30_amount
