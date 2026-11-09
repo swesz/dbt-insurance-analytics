@@ -179,6 +179,7 @@ least one day. A policy is **in force** at a period end if a term covers that da
 | UPR rollforward ties per policy and coverage | `tests/premium/assert_unearned_premium_rollforward_ties.sql` |
 | Terms expired by the valuation date are fully earned | `tests/premium/assert_expired_terms_fully_earned.sql` |
 | Transaction lines sum to their header | `tests/premium/assert_transaction_lines_sum_to_header.sql` |
+| Staging removes or flags exactly the planted policy_admin defects | `tests/premium/assert_policy_admin_planted_issue_counts.sql` |
 | Booking cases and earning formula | unit tests in `models/intermediate/premium/_int_premium__models.yml` |
 
 The control totals come from the generator's own Python, so agreement means two independent
