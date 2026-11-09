@@ -24,19 +24,27 @@
 -- cancellation, so restated May PIF includes it. Restated May PIF is one higher, and the row
 -- says REINSTATED_AFTER_CLOSE.
 --
--- Which periods have an as-reported figure: a snapshot only knows what it saw when it ran.
--- For a close before the snapshot's first run, the versions it holds are the states at that
--- first run; a term that changed in between has no version at the earlier close at all. So a
--- period is covered only if every term entered by its close has a version current at the
--- close. Periods that fail the check have no rows here, and the summary report shows them with
--- a null as-reported count rather than a wrong one.
+-- Which periods have an as-reported figure. First, only periods closed by the valuation date:
+-- a period whose close date is later has not been reported yet. Second, a snapshot only knows
+-- what it saw when it ran. For a close before the snapshot's first run, the versions it holds
+-- are the states at that first run; a term that changed in between has no version at the
+-- earlier close at all. So a period is covered only if every term entered by its close has a
+-- version current at the close. Periods that fail either test have no rows here, and the
+-- summary report shows them with a null as-reported count rather than a wrong one. The check
+-- does not catch every close skipped in the middle of the history (a term that existed before
+-- and changed twice keeps a stale version); docs/guide-snapshots-and-actuarial.md, section 3.
 with snapshot_terms as (
     select * from {{ ref('snap_policy_terms') }}
 ),
 
+-- Only periods whose books had closed by the valuation date can have an as-reported figure.
+-- The valuation period itself closes after it (2026-09 closes on 2026-10-06): its month-end
+-- report does not exist yet, so the snapshot's current state is not "as reported" for it, even
+-- if a snapshot ran on or after its close date (the close simulation runs one with --end
+-- 2026-09, on data that stops at the valuation date).
 periods as (
     select * from {{ ref('dim_accounting_periods') }}
-    where not is_after_valuation
+    where is_closed_at_valuation
 ),
 
 policies as (
@@ -54,10 +62,13 @@ month_end as (
 -- The instant each period's books close: the end of its close date (docs/source-systems.md 1),
 -- the same moment the month-end close simulation loads the sources as of.
 -- A version is "current at the close" by its dbt_valid_from, which is the source updated_at.
--- The warehouse only sees a change at the next 6-hourly sync (2e), so a change made on the
--- close date after 18:00 would count as known at the close here although it arrived just after
--- midnight. The source changes nothing between 18:00 and midnight (office hours and nightly
--- batches), so the two agree for this data.
+-- Limitation: the report really saw the state at the moment it ran on the close date, and the
+-- warehouse only sees a change at the next 6-hourly sync (2e), so a change made on the close
+-- date after the report ran would count as known at the close here. This is right only because
+-- the source changes nothing between the close-day export (17:30) and midnight: office hours
+-- end at 17:00 and nightly batches run after 01:00 (on the close dates the latest change is at
+-- 16:59:50). docs/guide-snapshots-and-actuarial.md, section 4, has the fix for a source where
+-- that does not hold.
 closes as (
     select
         accounting_period,

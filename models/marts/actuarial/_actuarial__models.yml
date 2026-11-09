@@ -245,7 +245,8 @@ models:
       One row per real policy and accounting period in which the policy was in force at the
       period end as reported at the close (the snap_policy_terms version current at the end
       of close_date, rule 3e) or as restated today (fct_policy_month_end), with the reason when
-      the two differ. Only periods whose close the snapshot recorded.
+      the two differ. Only periods closed by the valuation date whose close the snapshot
+      recorded.
     # Not tested, because the model guarantees them: every row is in force on at least one side
     # (it is a full outer join of the two in-force sets), and a row has a reason exactly when
     # the statuses differ (the case expression ends in 'OTHER'). The evidence is
@@ -342,7 +343,10 @@ models:
       - name: close_date
         description: The period's close date; as reported means as known at its end.
       - name: has_as_reported
-        description: True when the snapshot history covers the period's close.
+        description: >
+          True when the period had closed by the valuation date and the snapshot history covers
+          its close; false for the valuation period (its close date is later) and for periods
+          before the history starts.
         data_tests:
           - not_null
       - name: policies_in_force_as_reported

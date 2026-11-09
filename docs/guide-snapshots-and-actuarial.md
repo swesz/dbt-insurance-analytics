@@ -156,9 +156,44 @@ Two rules follow from "a snapshot only moves forward":
 - **History starts at the first run.** Periods before `--start` have no as-reported figures. The
   models detect this themselves (section 4) rather than trusting a parameter.
 
+What the script does not check: a **skipped close**. It refuses to replay backwards, but not to
+leave a gap: a run with `--start 2025-03` on top of history that ends at the 2025-01 close
+snapshots February's and March's changes in one go. A term that changed in February and again
+in March then keeps only its March version, and at the February close the snapshot still shows
+its January state. The coverage check of section 4 notices only a term that was *entered*
+between the two closes and changed again before the next run, because such a term has no
+version at all at the skipped close; a term that existed before and changed twice does not trip
+it. So the February figure can come out with `has_as_reported = true` and be wrong. Run the
+closes as one contiguous range (or `--fresh`), and if a run was interrupted, restart from the
+period after the last close it printed.
+
 `--raw-path` and `--dev-path` choose the files (defaults `warehouse/raw.duckdb` and
 `warehouse/dev.duckdb`). The loader replaces the raw file at every close, so nothing else may be
 reading it while the script runs.
+
+**Where the history lives.** Snapshot tables are part of the database they were built in, and
+only the simulation gives them history. A plain `dbt build` (or `dbt snapshot`) runs the
+snapshots once, against whatever raw holds at that moment: on the default load that records one
+version per key, the current state, and no past. So the as-reported figures exist only in the
+database the simulation wrote to, `warehouse/dev.duckdb` by default; `dbt build --target prod`
+on its own gives `warehouse/prod.duckdb` snapshots without history, and every period there has
+`has_as_reported = false`. To give prod the history, point the simulation at its file and then
+build prod:
+
+```
+python scripts/simulate_month_end_closes.py --start 2025-01 --end 2026-09 --fresh --dev-path warehouse/prod.duckdb
+dbt build --target prod
+```
+
+The script always runs `dbt snapshot` on the default target with `DBT_DUCKDB_DEV_PATH` set to
+`--dev-path`; that works for prod because both targets use the same schema names
+(`dbt_project.yml`), so the tables land where the prod target looks for them.
+
+**The last period has no close yet.** `--end 2026-09` replays a close on 2026-10-06, after the
+valuation date: the load as of that moment is the same as the default load, because the data
+stops at 2026-09-30. The books for 2026-09 have not closed at the valuation date, so the models
+give no as-reported figure for it (`has_as_reported = false`) whatever the snapshot holds. Only
+periods whose close date is on or before the valuation date can have one.
 
 What a run from 2025-01 to 2026-09 recorded (21 closes plus the final reload, about three and a
 half minutes):
@@ -212,7 +247,7 @@ How to read a row:
 | `policies_in_force_difference` | restated − as reported: positive means the period looks bigger in hindsight |
 | `term_entered_after_close_count` ... | how many policies each reason added or dropped |
 | `main_restatement_driver` | the reason behind most of them |
-| `has_as_reported` | false for periods before the snapshot history starts |
+| `has_as_reported` | false for periods before the snapshot history starts, and for a period whose close date is after the valuation date (2026-09) |
 
 A real row, May 2025, AUTO:
 
@@ -226,17 +261,37 @@ A real row, May 2025, AUTO:
 
 The as-reported figure was checked without any snapshot: loading raw as of
 `2025-06-05T23:59:59` and counting rule 3e directly on `raw.policy_admin.policy_terms` gives
-6,337 AUTO and 4,460 HOME, the model's figures. Over the 21 covered periods the differences run
-from −1 to +3 per period and line, 51 restated policy-periods in all: 33 late-entered terms
-(the most common driver), 11 cancellations entered after the close and 7 reinstatements. Small,
-because few transactions are entered late, but a closed month's PIF is rarely exactly what the
-board pack said.
+6,337 AUTO and 4,460 HOME, the model's figures. Over the 20 covered periods (2025-01 to
+2026-08; 40 period-lines) the differences run from −1 to +3 per period and line, nonzero in 26
+of the 40, and 51 restated policy-periods in all: 33 late-entered terms (the most common
+driver), 11 cancellations entered after the close and 7 reinstatements. Small, because few
+transactions are entered late, but a closed month's PIF is rarely exactly what the board pack
+said.
 
-**Which periods have an as-reported figure.** The model does not take the simulation's start
-date as a parameter; it checks the data. For a close the snapshot did not see, the versions it
-holds are the states of its first run, and every term that changed in between has no version
-current at that close. So a period counts as covered only if every term entered by its close has
-a version current at the close. The others get a null as-reported count, not a wrong one.
+**Which periods have an as-reported figure.** Only periods whose books had closed by the
+valuation date: 2026-09 closes on 2026-10-06, so it has none, even though the simulation runs a
+snapshot for it. Among those, the model does not take the simulation's start date as a
+parameter; it checks the data. For a close the snapshot did not see, the versions it holds are
+the states of its first run, and every term that changed in between has no version current at
+that close. So a period counts as covered only if every term entered by its close has a version
+current at the close. The others get a null as-reported count, not a wrong one. (The check
+does not catch every close skipped in the middle of the history; section 3 explains when it
+misses one.)
+
+**What "current at the close" means, and the assumption behind it.** The model takes the term
+version current at the end of the close date, 23:59:59, and reads "current" from
+`dbt_valid_from`, which for a timestamp snapshot is the source's `updated_at`: when the change
+happened in the policy system, not when the warehouse learned of it or when the snapshot ran.
+What the month-end report really saw is the state at the moment it ran, some time during the
+close date. The two agree only if no source change falls between that moment and midnight.
+They do here: on the close dates the latest term change starts at 16:59:50 and none starts after
+17:30, when the ledger export runs, because the policy system changes data during office hours
+(08:00 to 17:00) and in nightly batches (01:00 to 03:00). The simulation also loads each close
+as of 23:59:59. With a source that changes in the evening, a change made after the report ran
+would be counted as reported. The fix would be to time the close by the snapshot itself: record
+each close's snapshot run (for example the `run_started_at` of the job, or the connector's
+`_fivetran_synced`, which says when the warehouse received a row) and compare against that,
+instead of against a fixed end-of-day in source time.
 
 **The test.** `tests/actuarial/assert_pif_as_reported_equals_restated_when_unchanged.sql`: for
 every policy whose terms that could be in force at the period end look the same at the close and

@@ -36,6 +36,19 @@ Order matters. A snapshot only moves forward: replaying an earlier as-of on top 
 has already recorded would not undo it (a timestamp strategy ignores rows older than what it
 stored). So the script refuses to start before the latest version already in the snapshots,
 unless --fresh drops the snapshot tables first.
+
+What it does not check: a gap. Starting after a close that was never replayed (history up to
+the 2025-01 close, then --start 2025-03) snapshots two months of changes in one run, so a term
+that changed twice in between keeps only its second state, and the skipped close shows the
+state before both. The models' coverage check (fct_policy_in_force_at_close) notices only
+terms entered in the gap, not every such case. The snapshot tables do not record which closes
+were replayed (dbt_valid_from is source time), so the script cannot tell a gap from a quiet
+month; replay the closes as one contiguous range, or start over with --fresh.
+
+The last period may close after the valuation date (2026-09 closes 2026-10-06): its load is
+the default load, since the data stops at the valuation date, and the models give it no
+as-reported figure. Snapshots land in --dev-path only; to give the prod database history, pass
+--dev-path warehouse/prod.duckdb (both dbt targets use the same schema names).
 """
 
 from __future__ import annotations
