@@ -1,0 +1,236 @@
+version: 2
+
+sources:
+  - name: policy_admin
+    database: raw
+    schema: policy_admin
+    description: >
+      The policy administration system, replicated Fivetran-style: one row per primary key in
+      its latest state. Rows deleted in the source stay with _fivetran_deleted = true. See
+      docs/source-systems.md, sections 2a and 3a-3e.
+    config:
+      # Freshness asks "when did the connector last write anything?". Fivetran stamps every row
+      # it writes with _fivetran_synced, and syncs run every 6 hours, so a healthy table has a
+      # row synced within the last ~6 hours on any day with activity. Warn after one missed day,
+      # error after three. `dbt source freshness` compares with the wall clock, so a historical
+      # load of generated data (it ends on the valuation date) reports stale by design; the
+      # check is here for the shape a production project would run on a schedule. `dbt build`
+      # does not run it.
+      loaded_at_field: _fivetran_synced
+      freshness:
+        warn_after: {count: 24, period: hour}
+        error_after: {count: 72, period: hour}
+    tables:
+      - name: policyholders
+        description: Customers. Duplicate records merged away in the source are soft-deleted.
+        columns:
+          - name: policyholder_id
+            description: Primary key.
+            data_tests:
+              - unique
+              - not_null
+          - name: first_name
+            description: Given name.
+          - name: last_name
+            description: Family name.
+          - name: date_of_birth
+            description: Date of birth.
+          - name: email
+            description: Email address; @test.example.com marks QA test customers.
+          - name: address_state
+            description: Two-letter state code of the mailing address.
+          - name: address_zip
+            description: Five-digit ZIP code, as text to keep leading zeros.
+          - name: created_at
+            description: When the record was created in the source.
+          - name: updated_at
+            description: Last change in the source; changes when the address changes.
+          - name: _fivetran_synced
+            description: When the connector last wrote the row.
+          - name: _fivetran_deleted
+            description: True when the row was deleted in the source.
+
+      - name: policies
+        description: Policies. One per contract; its terms renew under the same policy.
+        columns:
+          - name: policy_id
+            description: Primary key. 9000000 and up are QA test policies.
+            data_tests:
+              - unique
+              - not_null
+          - name: policy_number
+            description: "'PA-0001234' (auto) or 'HO-0001234' (home)."
+            data_tests:
+              - unique
+              - not_null
+          - name: policyholder_id
+            description: The policyholder who owns the policy.
+            data_tests:
+              - not_null
+          - name: line_of_business
+            description: AUTO or HOME.
+            data_tests:
+              - accepted_values:
+                  arguments:
+                    values: ['AUTO', 'HOME']
+          - name: risk_state
+            description: State where the risk is located (rating state).
+          - name: sales_channel
+            description: ONLINE, PHONE or AGENCY.
+          - name: original_effective_date
+            description: Effective date of the first term.
+          - name: policy_status
+            description: Current state only (ACTIVE, CANCELLED, EXPIRED).
+          - name: created_at
+            description: When the policy was created.
+          - name: updated_at
+            description: Last change in the source.
+          - name: _fivetran_synced
+            description: When the connector last wrote the row.
+          - name: _fivetran_deleted
+            description: True when the row was deleted in the source.
+
+      - name: policy_terms
+        description: >
+          Policy terms in their current state. A cancellation overwrites the row, so the earlier
+          status is gone (see snapshots/).
+        columns:
+          - name: term_id
+            description: Primary key.
+            data_tests:
+              - unique
+              - not_null
+          - name: policy_id
+            description: The policy the term belongs to.
+            data_tests:
+              - not_null
+          - name: term_number
+            description: 1 for new business, then 2, 3, ... per renewal.
+          - name: term_effective_date
+            description: First covered day.
+          - name: term_expiration_date
+            description: Exclusive end; coverage ends at 00:00 on this date.
+          - name: billing_plan
+            description: PAY_IN_FULL or MONTHLY.
+          - name: term_status
+            description: Current state (ACTIVE, EXPIRED, CANCELLED).
+          - name: cancellation_effective_date
+            description: Null unless cancelled.
+          - name: cancellation_reason
+            description: INSURED_REQUEST, NONPAYMENT or UNDERWRITING; null unless cancelled.
+          - name: term_written_premium
+            description: Current total of the term's transactions.
+          - name: created_at
+            description: When the term was created.
+          - name: updated_at
+            description: Changes on cancel, reinstate, endorse and expire.
+          - name: _fivetran_synced
+            description: When the connector last wrote the row.
+          - name: _fivetran_deleted
+            description: True when the row was deleted in the source.
+
+      - name: policy_transactions
+        description: >
+          Every premium movement on a term. Rows never change once written; written_premium is
+          signed and equals the sum of the transaction's lines.
+        columns:
+          - name: transaction_id
+            description: Primary key.
+            data_tests:
+              - unique
+              - not_null
+          - name: policy_id
+            description: The policy.
+            data_tests:
+              - not_null
+          - name: term_id
+            description: The term the transaction belongs to.
+            data_tests:
+              - not_null
+          - name: transaction_type
+            description: NEW_BUSINESS, RENEWAL, ENDORSEMENT, CANCELLATION or REINSTATEMENT.
+            data_tests:
+              - accepted_values:
+                  arguments:
+                    values: ['NEW_BUSINESS', 'RENEWAL', 'ENDORSEMENT', 'CANCELLATION', 'REINSTATEMENT']
+          - name: transaction_date
+            description: The date the transaction is dated; drives the accounting period.
+          - name: effective_date
+            description: When the change takes effect on coverage; can precede transaction_date.
+          - name: written_premium
+            description: Signed premium change, in dollars.
+          - name: created_at
+            description: When the transaction was entered; decides the booked period after a close.
+          - name: _fivetran_synced
+            description: When the connector last wrote the row.
+          - name: _fivetran_deleted
+            description: True when the row was deleted in the source.
+
+      - name: policy_transaction_lines
+        description: Each transaction split by coverage.
+        columns:
+          - name: transaction_line_id
+            description: Primary key.
+            data_tests:
+              - unique
+              - not_null
+          - name: transaction_id
+            description: The transaction header.
+            data_tests:
+              - not_null
+          - name: coverage_code
+            description: See seeds/coverages.csv.
+          - name: written_premium
+            description: Signed premium change for this coverage, in dollars.
+          - name: _fivetran_synced
+            description: When the connector last wrote the row.
+          - name: _fivetran_deleted
+            description: True when the row was deleted in the source.
+
+      - name: vehicles
+        description: Insured vehicles on AUTO policies; one exposure unit each.
+        columns:
+          - name: vehicle_id
+            description: Primary key.
+            data_tests:
+              - unique
+              - not_null
+          - name: policy_id
+            description: The AUTO policy insuring the vehicle.
+          - name: model_year
+            description: Model year.
+          - name: make
+            description: Manufacturer.
+          - name: body_type
+            description: SEDAN, SUV, PICKUP, MINIVAN or COUPE.
+          - name: created_at
+            description: When the vehicle was added.
+          - name: _fivetran_synced
+            description: When the connector last wrote the row.
+          - name: _fivetran_deleted
+            description: True when the row was deleted in the source.
+
+      - name: dwellings
+        description: Insured dwellings on HOME policies; one exposure unit each.
+        columns:
+          - name: dwelling_id
+            description: Primary key.
+            data_tests:
+              - unique
+              - not_null
+          - name: policy_id
+            description: The HOME policy insuring the dwelling.
+          - name: year_built
+            description: Year of construction.
+          - name: construction_type
+            description: FRAME, MASONRY or SUPERIOR.
+          - name: square_feet
+            description: Living area.
+          - name: coverage_a_limit
+            description: Dwelling limit (coverage A), in dollars.
+          - name: created_at
+            description: When the dwelling was added.
+          - name: _fivetran_synced
+            description: When the connector last wrote the row.
+          - name: _fivetran_deleted
+            description: True when the row was deleted in the source.

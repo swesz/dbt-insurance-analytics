@@ -1,0 +1,187 @@
+version: 2
+
+models:
+  - name: stg_policy_admin__policyholders
+    description: >
+      Policyholders (customers), one row per policyholder_id. Soft-deleted duplicates are
+      removed; QA test customers are kept and flagged with is_test_record.
+    columns:
+      - name: policyholder_id
+        description: Primary key.
+        data_tests:
+          - unique
+          - not_null
+      - name: first_name
+        description: Given name.
+      - name: last_name
+        description: Family name.
+      - name: date_of_birth
+        description: Date of birth.
+      - name: email
+        description: Email address.
+        data_tests:
+          - not_null
+      - name: address_state
+        description: Two-letter state code of the mailing address.
+        data_tests:
+          - relationships:
+              arguments:
+                to: ref('states')
+                field: state_code
+      - name: address_zip
+        description: Five-digit ZIP code, as text.
+      - name: is_test_record
+        description: True for QA test customers (email ends in @test.example.com).
+        data_tests:
+          - not_null
+      - name: created_at
+        description: When the record was created in the source.
+      - name: updated_at
+        description: Last change in the source.
+
+  - name: stg_policy_admin__policies
+    description: >
+      Policies, one row per policy_id, in their current state. Soft-deleted policies are
+      removed; QA test policies (policy_id 9000000 and up) are kept and flagged.
+    columns:
+      - name: policy_id
+        description: Primary key.
+        data_tests:
+          - unique
+          - not_null
+      - name: policy_number
+        description: "'PA-' (auto) or 'HO-' (home) plus seven digits."
+        data_tests:
+          - unique
+          - not_null
+          - dbt_utils.expression_is_true:
+              arguments:
+                expression: "similar to '(PA|HO)-[0-9]{7}'"
+      - name: policyholder_id
+        description: The policyholder who owns the policy.
+        data_tests:
+          - not_null
+          # Catches a policy pointing at a soft-deleted (merged) customer record.
+          - relationships:
+              arguments:
+                to: ref('stg_policy_admin__policyholders')
+                field: policyholder_id
+      - name: line_of_business
+        description: AUTO or HOME.
+        data_tests:
+          - not_null
+          - accepted_values:
+              arguments:
+                values: ['AUTO', 'HOME']
+      - name: risk_state
+        description: State where the insured risk is located.
+        data_tests:
+          - not_null
+          - relationships:
+              arguments:
+                to: ref('states')
+                field: state_code
+      - name: sales_channel
+        description: ONLINE, PHONE or AGENCY.
+        data_tests:
+          - accepted_values:
+              arguments:
+                values: ['ONLINE', 'PHONE', 'AGENCY']
+      - name: original_effective_date
+        description: Effective date of the first term.
+        data_tests:
+          - not_null
+      - name: policy_status
+        description: Current state (ACTIVE, CANCELLED, EXPIRED); overwritten in place by the source.
+        data_tests:
+          - accepted_values:
+              arguments:
+                values: ['ACTIVE', 'CANCELLED', 'EXPIRED']
+      - name: is_test_policy
+        description: True for QA test policies (policy_id >= 9000000).
+        data_tests:
+          - not_null
+      - name: created_at
+        description: When the policy was created.
+      - name: updated_at
+        description: Last change in the source.
+
+  - name: stg_policy_admin__policy_terms
+    description: >
+      Policy terms, one row per term_id, in their current state. Soft-deleted rows are removed;
+      terms of QA test policies are kept and flagged.
+    data_tests:
+      - dbt_utils.unique_combination_of_columns:
+          arguments:
+            combination_of_columns: ['policy_id', 'term_number']
+      # A cancellation falls inside the term: on the first day (flat) up to the last day.
+      - dbt_utils.expression_is_true:
+          arguments:
+            expression: >
+              cancellation_effective_date is null
+              or (cancellation_effective_date >= term_effective_date
+                  and cancellation_effective_date < term_expiration_date)
+    columns:
+      - name: term_id
+        description: Primary key.
+        data_tests:
+          - unique
+          - not_null
+      - name: policy_id
+        description: The policy the term belongs to.
+        data_tests:
+          - not_null
+          - relationships:
+              arguments:
+                to: ref('stg_policy_admin__policies')
+                field: policy_id
+      - name: term_number
+        description: 1 for new business, then 2, 3, ... per renewal.
+        data_tests:
+          - not_null
+      - name: term_effective_date
+        description: First covered day.
+        data_tests:
+          - not_null
+      - name: term_expiration_date
+        description: Exclusive end date; the term covers [term_effective_date, term_expiration_date).
+        data_tests:
+          - not_null
+      - name: term_days
+        description: Covered days, term_expiration_date - term_effective_date.
+        data_tests:
+          - not_null
+          - dbt_utils.accepted_range:
+              arguments:
+                min_value: 1
+      - name: billing_plan
+        description: PAY_IN_FULL or MONTHLY.
+        data_tests:
+          - accepted_values:
+              arguments:
+                values: ['PAY_IN_FULL', 'MONTHLY']
+      - name: term_status
+        description: Current state (ACTIVE, EXPIRED, CANCELLED).
+        data_tests:
+          - not_null
+          - accepted_values:
+              arguments:
+                values: ['ACTIVE', 'EXPIRED', 'CANCELLED']
+      - name: cancellation_effective_date
+        description: First day without coverage after a cancellation; null unless cancelled.
+      - name: cancellation_reason
+        description: INSURED_REQUEST, NONPAYMENT or UNDERWRITING; null unless cancelled.
+        data_tests:
+          - accepted_values:
+              arguments:
+                values: ['INSURED_REQUEST', 'NONPAYMENT', 'UNDERWRITING']
+      - name: term_written_premium
+        description: Current total of the term's written premium, as the source keeps it.
+      - name: is_test_policy
+        description: True for terms of QA test policies (policy_id >= 9000000).
+        data_tests:
+          - not_null
+      - name: created_at
+        description: When the term was created.
+      - name: updated_at
+        description: Last change in the source.
