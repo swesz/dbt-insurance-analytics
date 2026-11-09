@@ -1,0 +1,66 @@
+version: 2
+
+# Exposures: the things outside dbt that use its models. Declaring them puts the consumers in
+# the lineage graph, so a change to a model shows who is affected
+# (`dbt ls --select +exposure:monthly_close_package` lists everything one of them needs), and
+# `dbt build --select +exposure:reserving_workbook` builds and tests exactly that. Owners are
+# teams, reached at a shared mailbox, not people: people change roles, the mailbox stays.
+
+exposures:
+  - name: monthly_close_package
+    label: Monthly close package
+    type: analysis
+    maturity: high
+    description: >
+      The package the accounting team signs off at each month-end close: the trial balance,
+      the subledger-to-general-ledger reconciliation (premium, cash, losses and reserves per
+      account and line of business), the unearned premium and loss reserve rollforwards and the
+      premium receivable with its aging. A difference in the reconciliation must be explained
+      by an item in seeds/gl_reconciling_items.csv before the period is closed.
+    owner:
+      name: Financial reporting team
+      email: financial-reporting@example.com
+    depends_on:
+      - ref('rpt_trial_balance')
+      - ref('rpt_subledger_gl_reconciliation')
+      - ref('rpt_unearned_premium_rollforward')
+      - ref('rpt_loss_reserve_rollforward')
+      - ref('rpt_premium_receivable')
+      - ref('rpt_premium_receivable_aging')
+
+  - name: reserving_workbook
+    label: Reserving workbook
+    type: analysis
+    maturity: medium
+    description: >
+      The actuarial team's quarterly reserve review: loss development triangles (paid,
+      incurred and reported counts by accident year and quarter) feed the chain-ladder
+      projection in analyses/chain_ladder_development_factors.sql; the accident-year and
+      calendar-period loss ratios, frequency and severity, and the as-reported versus
+      restated policy counts put the projection in context.
+    owner:
+      name: Actuarial reserving team
+      email: actuarial-reserving@example.com
+    depends_on:
+      - ref('rpt_loss_development_triangle')
+      - ref('rpt_loss_ratio_by_accident_year')
+      - ref('rpt_loss_ratio_by_period')
+      - ref('rpt_frequency_severity')
+      - ref('rpt_policies_in_force_as_reported_vs_restated')
+
+  - name: claims_operations_dashboard
+    label: Claims operations dashboard
+    type: dashboard
+    maturity: medium
+    description: >
+      Daily view for claims managers: open claims and exposures by adjuster, report lag,
+      reopened claims, catastrophe claim volumes, and paid, case reserve and incurred per
+      exposure month by month.
+    owner:
+      name: Claims operations team
+      email: claims-operations@example.com
+    depends_on:
+      - ref('dim_claims')
+      - ref('dim_claim_exposures')
+      - ref('dim_adjusters')
+      - ref('fct_claim_exposure_period_balances')
