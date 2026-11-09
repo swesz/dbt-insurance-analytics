@@ -117,3 +117,15 @@ IDs are permanent and never reused. Status: proposed, accepted, superseded (by D
 - A policy's earned exposure counts for a coverage only in months it earns premium on that
   coverage (collision and comprehensive are optional). Orphan claims and losses outside the term
   are left out of frequency and severity.
+
+## D-015: Ledger amounts are signed debit-positive; reconciling items are ledger minus subledger
+- Status: proposed 2026-11-08
+- Postings and balances use one signed amount (debit +, credit −). A documented reconciling item's
+  `amount` is ledger minus subledger, so `unexplained_difference = difference - documented`.
+  Tolerance 0.01 per row (`macros/accounting_reconciliation_tolerance.sql`).
+
+## D-016: Receivable aging allocation
+- Status: proposed 2026-11-08
+- Refunds first use up the credits they pay out; remaining credits settle the latest-due
+  installments first; cash settles the oldest-due first. The spec does not say whether a credit
+  is refunded or applied to future installments [E].

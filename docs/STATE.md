@@ -24,7 +24,7 @@ to the old session, so judge their results from `git log` and by rerunning every
 | generator (done) | `generator/`, `loader/` (not `raw_schema.sql`), exact counts in `docs/data-issues.md` | done: `warehouse/RAW_READY` exists |
 | premium (done) | `models/staging/policy_admin`, `intermediate/premium`, `marts/premium`, policy dims in `marts/core`, `tests/premium`, `docs/guide-premium.md` | validated against real data |
 | claims (done) | `models/staging/claims`, `intermediate/claims`, `marts/claims`, claim dims, the triangle, `analyses/`, `tests/claims`, `docs/guide-claims.md` | same |
-| accounting | `models/staging/billing`, `staging/general_ledger`, `intermediate/accounting`, `marts/accounting`, `tests/accounting`, `seeds/gl_reconciling_items.csv`, `docs/guide-accounting.md` | reconciliation has no unexplained differences |
+| accounting (done) | `models/staging/billing`, `staging/general_ledger`, `intermediate/accounting`, `marts/accounting`, `tests/accounting`, `seeds/gl_reconciling_items.csv`, `docs/guide-accounting.md` | reconciliation has no unexplained differences |
 | actuarial + snapshots (done) | `marts/actuarial` (not the triangle), `snapshots/`, `models/exposures.yml`, `tests/actuarial`, `scripts/simulate_month_end_closes.py`, `docs/guide-snapshots-and-actuarial.md` | simulation shows real snapshot history |
 
 ## Generator results (from its final report; not yet rechecked by anyone else)
@@ -77,6 +77,18 @@ to the old session, so judge their results from `git log` and by rerunning every
 - A full-project build in its dev file showed 3 accounting test errors while the accounting agent
   was still working: recheck once accounting reports.
 - After any regeneration, rerun the simulation with `--fresh`.
+
+## Accounting results (from its final report), and status after all five agents
+- Full project build, run by the accounting agent: 786 pass, 2 warn (the planted claims
+  defects), 0 error. The reconciliation has 1,344 rows: 1,338 MATCHED and 6 EXPLAINED, which are
+  the planted 2024-06 reclass and the 2025-08/09 timing item.
+- The agent's 6 reconciling items equal the generator's expected list exactly [V, coordinator].
+- Fixed upstream: `cents_to_dollars` returned DOUBLE, and now returns DECIMAL.
+- All five agents finished. No agent is running any more.
+- Wording: the generator used a term from the external blocklist for home policies bought by auto customers. It
+  is renamed in the current files. Earlier commits still contain it, and the external blocklist
+  now fails on it, so the public-safety scan fails on history until the history is rewritten or
+  squashed before the first push (owner's choice).
 
 ## Next steps, in order
 1. Confirm every agent has finished: `warehouse/RAW_READY` exists, the commits have stopped,
