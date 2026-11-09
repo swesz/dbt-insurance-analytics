@@ -25,7 +25,7 @@ to the old session, so judge their results from `git log` and by rerunning every
 | premium (done) | `models/staging/policy_admin`, `intermediate/premium`, `marts/premium`, policy dims in `marts/core`, `tests/premium`, `docs/guide-premium.md` | validated against real data |
 | claims (done) | `models/staging/claims`, `intermediate/claims`, `marts/claims`, claim dims, the triangle, `analyses/`, `tests/claims`, `docs/guide-claims.md` | same |
 | accounting | `models/staging/billing`, `staging/general_ledger`, `intermediate/accounting`, `marts/accounting`, `tests/accounting`, `seeds/gl_reconciling_items.csv`, `docs/guide-accounting.md` | reconciliation has no unexplained differences |
-| actuarial + snapshots | `marts/actuarial` (not the triangle), `snapshots/`, `models/exposures.yml`, `tests/actuarial`, `scripts/simulate_month_end_closes.py`, `docs/guide-snapshots-and-actuarial.md` | simulation shows real snapshot history |
+| actuarial + snapshots (done) | `marts/actuarial` (not the triangle), `snapshots/`, `models/exposures.yml`, `tests/actuarial`, `scripts/simulate_month_end_closes.py`, `docs/guide-snapshots-and-actuarial.md` | simulation shows real snapshot history |
 
 ## Generator results (from its final report; not yet rechecked by anyone else)
 - Done: `warehouse/raw.duckdb` loaded at the default as-of, `warehouse/RAW_READY` created.
@@ -67,6 +67,16 @@ to the old session, so judge their results from `git log` and by rerunning every
 - To review: `is_loss_outside_term` is null for the orphans. Warn tests use
   `severity: error` with `warn_if`/`error_if`, because with `severity: warn` dbt never applies
   `error_if`.
+
+## Actuarial and snapshot results (from its final report)
+- Its 100 nodes pass. The simulation ran 2025-01..2026-09 in 201 s: 32,557 terms, 861
+  policyholders and 257 payments have more than one snapshot version.
+- As-reported PIF differs from restated in 32 of 42 period × LOB rows (late new business, late
+  cancellations, reinstatements). A raw load as of the 2025-06 close counts AUTO 6,337 and
+  HOME 4,460, equal to the model's as-reported figures.
+- A full-project build in its dev file showed 3 accounting test errors while the accounting agent
+  was still working: recheck once accounting reports.
+- After any regeneration, rerun the simulation with `--fresh`.
 
 ## Next steps, in order
 1. Confirm every agent has finished: `warehouse/RAW_READY` exists, the commits have stopped,

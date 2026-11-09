@@ -40,9 +40,9 @@ Planned names. The owner column is the work split used to build v1 in parallel.
 | actuarial (claims side) | `rpt_loss_development_triangle` | claims |
 | staging billing, ledger | `stg_billing__installments`, `stg_billing__payments`, `stg_general_ledger__journal_lines` | accounting |
 | accounting marts | `rpt_unearned_premium_rollforward`, `rpt_loss_reserve_rollforward`, `rpt_subledger_gl_reconciliation`, `rpt_trial_balance`, `rpt_premium_receivable` | accounting |
-| actuarial | `rpt_loss_ratio_by_period`, `rpt_loss_ratio_by_accident_year`, `rpt_frequency_severity` | accounting |
-| snapshots | `snap_policy_terms`, `snap_policyholders`, `snap_billing_payments`, `snap_monthly_close_summary` | accounting |
-| exposures | `models/exposures.yml` | accounting |
+| actuarial | `rpt_loss_ratio_by_period`, `rpt_loss_ratio_by_accident_year`, `rpt_frequency_severity`, `fct_policy_in_force_at_close`, `rpt_policies_in_force_as_reported_vs_restated` | actuarial |
+| snapshots | `snap_policy_terms`, `snap_policyholders`, `snap_billing_payments` (the month-end close figures are rebuilt from `snap_policy_terms`, so no separate close snapshot) | actuarial |
+| exposures | `models/exposures.yml` | actuarial |
 
 ## Tests
 

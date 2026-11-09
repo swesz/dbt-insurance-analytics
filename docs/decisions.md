@@ -100,3 +100,20 @@ IDs are permanent and never reused. Status: proposed, accepted, superseded (by D
 - Status: accepted 2026-11-08
 - A cell at age n holds what was booked by the end of that evaluation period, so the triangle
   agrees with the ledger. It includes orphan claims and excludes expenses.
+
+## D-013: Snapshot configuration
+- Status: accepted 2026-11-08
+- Snapshots read sources, not staging, so a later change to staging logic cannot rewrite history.
+- `hard_deletes: ignore`: the policy and billing sources soft-delete (a flag), so a row never
+  disappears from them.
+- `dbt_valid_to_current: 9999-12-31`, so "current" rows can be found with a range condition
+  instead of `is null`.
+- `snap_policyholders` uses the check strategy on email, address and `_fivetran_deleted`, with
+  `_fivetran_synced` as the time: a soft delete leaves the source `updated_at` unchanged, so a
+  timestamp strategy would miss all 40 deletions [V, actuarial build].
+
+## D-014: Frequency and severity attribute exposure by coverage earned
+- Status: accepted 2026-11-08
+- A policy's earned exposure counts for a coverage only in months it earns premium on that
+  coverage (collision and comprehensive are optional). Orphan claims and losses outside the term
+  are left out of frequency and severity.
