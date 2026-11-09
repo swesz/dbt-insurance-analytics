@@ -5,8 +5,8 @@
 --   DELETED_CLAIMS            claim and exposure keys whose latest version is a delete (dropped)
 --   CDC_DUPLICATE_VERSIONS    raw rows collapsed as re-loaded copies of a version, per table
 --   ORPHAN_CLAIMS             claims with no matching policy (kept, flagged)
---   MALFORMED_POLICY_NUMBERS  claim versions (rows, as the generator counts them) whose typed
---                             policy number needed normalizing
+--   MALFORMED_POLICY_NUMBERS  raw claim rows whose typed policy number staging had to normalize,
+--                             rerun copies included: the generator counts every loaded row
 --   LOSS_OUTSIDE_TERM         claims whose loss date no covering term includes (kept, flagged)
 --
 -- The planted counts describe the default (valuation-date) load, so the comparison runs only on
@@ -28,6 +28,10 @@ control_totals as (
 
 planted_issues as (
     select * from {{ source('generator_audit', 'planted_issues') }}
+),
+
+claims_source as (
+    select * from {{ source('claims', 'claims') }}
 ),
 
 claim_versions as (
@@ -94,9 +98,17 @@ actual as (
     union all
 
     -- A claim typed with a bad number keeps it in later versions; staging normalizes each one.
+    -- The generator counts raw rows, so a version a rerun loaded twice (CDC_DUPLICATE_VERSIONS)
+    -- counts twice. Counting staging's deduplicated versions instead agrees only while no rerun
+    -- copy happens to fall on a malformed version (true at seed 42, not at seed 1). So each raw
+    -- row is counted, with the flag of the version it collapses into: the copies of a version
+    -- are identical (assert_cdc_duplicate_versions_are_exact), so they share its flag.
     select 'MALFORMED_POLICY_NUMBERS', 'claims.claims', count(*)
-    from claim_versions
-    where is_policy_number_malformed
+    from claims_source
+    inner join claim_versions
+        on claims_source.claim_id = claim_versions.claim_id
+        and claims_source.updated_at = claim_versions.updated_at
+    where claim_versions.is_policy_number_malformed
 
     union all
 
