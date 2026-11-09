@@ -1,0 +1,286 @@
+version: 2
+
+models:
+  - name: int_accounting__billing_cash_events
+    description: >
+      One row per movement of billing cash on a real policy: RECEIPT and REFUND in the calendar
+      month of received_at, and RETURN (the reversal of a bounced receipt) in the month of
+      returned_at. Summed by period, the cash the ledger posts to 1000 / 1200
+      (docs/source-systems.md 3h).
+    data_tests:
+      # A refund is negative, a receipt positive, a return the negative of a receipt.
+      - dbt_utils.expression_is_true:
+          arguments:
+            expression: "(cash_event_type = 'RECEIPT') = (cash_amount > 0)"
+    columns:
+      - name: cash_event_id
+        description: "Primary key: payment_id and event type, e.g. '1234-RETURN'."
+        data_tests:
+          - unique
+          - not_null
+      - name: payment_id
+        description: The payment.
+        data_tests:
+          - not_null
+          - relationships:
+              arguments:
+                to: ref('stg_billing__payments')
+                field: payment_id
+      - name: cash_event_type
+        description: RECEIPT, REFUND or RETURN.
+        data_tests:
+          - not_null
+          - accepted_values:
+              arguments:
+                values: ['RECEIPT', 'REFUND', 'RETURN']
+      - name: policy_id
+        description: The policy.
+        data_tests:
+          - not_null
+          - relationships:
+              arguments:
+                to: ref('dim_policies')
+                field: policy_id
+      - name: policy_number
+        description: Policy number.
+      - name: line_of_business
+        description: AUTO or HOME.
+        data_tests:
+          - not_null
+          - accepted_values:
+              arguments:
+                values: ['AUTO', 'HOME']
+      - name: payment_method
+        description: ACH, CARD or CHECK.
+      - name: event_at
+        description: When the money moved (received_at, or returned_at for a RETURN).
+        data_tests:
+          - not_null
+      - name: event_date
+        description: Date of event_at.
+      - name: accounting_period
+        description: Calendar period of event_at, the period the ledger books the cash in.
+        data_tests:
+          - not_null
+          - relationships:
+              arguments:
+                to: ref('accounting_periods')
+                field: accounting_period
+      - name: cash_amount
+        description: Signed cash, positive in, negative out.
+        data_tests:
+          - not_null
+
+  - name: int_accounting__subledger_postings
+    description: >
+      The GL postings the subledgers imply, per accounting period x line of business x GL
+      account, as signed amounts (debit positive, credit negative), following the posting table
+      in docs/source-systems.md 3h. Covers every period with subledger activity, including the
+      open valuation period.
+    data_tests:
+      - dbt_utils.unique_combination_of_columns:
+          arguments:
+            combination_of_columns: ['accounting_period', 'line_of_business', 'account_number']
+    columns:
+      - name: posting_key
+        description: "Primary key: 'period|line_of_business|account_number'."
+        data_tests:
+          - unique
+          - not_null
+      - name: accounting_period
+        description: Booked accounting period.
+        data_tests:
+          - not_null
+          - relationships:
+              arguments:
+                to: ref('accounting_periods')
+                field: accounting_period
+      - name: line_of_business
+        description: AUTO or HOME.
+        data_tests:
+          - not_null
+          - accepted_values:
+              arguments:
+                values: ['AUTO', 'HOME']
+      - name: account_number
+        description: GL account.
+        data_tests:
+          - not_null
+          - relationships:
+              arguments:
+                to: ref('gl_accounts')
+                field: account_number
+      - name: source_systems
+        description: The subledgers that feed the row, comma-separated.
+        data_tests:
+          - not_null
+      - name: subledger_amount
+        description: Signed amount the ledger should hold for the row.
+        data_tests:
+          - not_null
+
+  - name: int_accounting__gl_balances_by_period
+    description: >
+      GL activity and inception-to-date balance per period x account x line of business through
+      the valuation period, with the documented reconciling items and their running total. All
+      signed debit positive. GL columns are null for periods without a ledger export.
+    data_tests:
+      - dbt_utils.unique_combination_of_columns:
+          arguments:
+            combination_of_columns: ['accounting_period', 'account_number', 'line_of_business']
+      # A closed period has a ledger export, and a ledger export belongs to a closed period.
+      - dbt_utils.expression_is_true:
+          arguments:
+            expression: "has_ledger_export = is_closed_at_valuation"
+          config:
+            # On an empty or partial raw load there is no ledger yet; the check then means
+            # nothing, so it only warns.
+            severity: warn
+    columns:
+      - name: balance_key
+        description: "Primary key: 'period|account_number|line_of_business'."
+        data_tests:
+          - unique
+          - not_null
+      - name: accounting_period
+        description: Accounting period.
+        data_tests:
+          - not_null
+      - name: account_number
+        description: GL account.
+        data_tests:
+          - not_null
+      - name: line_of_business
+        description: AUTO or HOME.
+        data_tests:
+          - not_null
+      - name: is_closed_at_valuation
+        description: True when the period closed on or before the valuation date.
+        data_tests:
+          - not_null
+      - name: has_ledger_export
+        description: True when the ledger has an export file for the period.
+        data_tests:
+          - not_null
+      - name: gl_net_amount
+        description: Net GL activity in the period; null without a ledger export.
+      - name: gl_itd_balance_amount
+        description: GL balance at the period end (running sum of activity); null without a ledger export.
+      - name: documented_items_amount
+        description: Documented reconciling items of the period (seeds/gl_reconciling_items.csv).
+        data_tests:
+          - not_null
+      - name: documented_items_itd_amount
+        description: Running sum of documented items through the period, the items' effect on the balance.
+        data_tests:
+          - not_null
+
+  - name: int_accounting__installment_allocation
+    description: >
+      Each positive installment of a real policy's transaction booked by the valuation period,
+      with the credit and cash applied to it and the amount still open at the valuation date.
+      Credits settle a term's latest-due installments first; cash settles the policy's
+      oldest-due installments first. See the model header for the reasoning.
+    data_tests:
+      # Nothing is over-applied: credit + cash applied never exceed the installment.
+      - dbt_utils.expression_is_true:
+          arguments:
+            expression: "credit_applied_amount + cash_applied_amount <= installment_amount"
+      - dbt_utils.expression_is_true:
+          arguments:
+            expression: "open_amount >= 0 and credit_applied_amount >= 0 and cash_applied_amount >= 0"
+    columns:
+      - name: installment_id
+        description: Primary key.
+        data_tests:
+          - unique
+          - not_null
+          - relationships:
+              arguments:
+                to: ref('stg_billing__installments')
+                field: installment_id
+      - name: policy_id
+        description: The policy.
+        data_tests:
+          - not_null
+      - name: term_id
+        description: The term.
+        data_tests:
+          - not_null
+      - name: transaction_id
+        description: The policy transaction billed.
+        data_tests:
+          - not_null
+      - name: installment_number
+        description: 1..n within the transaction.
+      - name: due_date
+        description: Due date (current state).
+        data_tests:
+          - not_null
+      - name: installment_amount
+        description: The installment, in dollars (always positive here).
+        data_tests:
+          - not_null
+      - name: credit_applied_amount
+        description: Part settled by the term's credits.
+        data_tests:
+          - not_null
+      - name: cash_applied_amount
+        description: Part settled by the policy's cash.
+        data_tests:
+          - not_null
+      - name: open_amount
+        description: Still owed at the valuation date.
+        data_tests:
+          - not_null
+      - name: days_past_due
+        description: Valuation date minus due date; 0 or negative when not past due.
+        data_tests:
+          - not_null
+
+unit_tests:
+  # Allocation order, with numbers worked by hand. A monthly auto term of 6 x 100.00, due on
+  # the 1st of 2026-03 .. 2026-08; the customer paid installments 1 and 2 (200.00) and stopped,
+  # so the term was cancelled for nonpayment effective mid-June with a -250.00 credit. Valuation
+  # date 2026-09-30.
+  #   Pass 1, credit 250 latest-due first: #6 gets 100, #5 gets 100, #4 gets 50.
+  #   Pass 2, cash 200 oldest-due first: #1 gets 100, #2 gets 100.
+  #   Open: #3 100.00 (due 2026-05-01, 152 days past due) and #4 50.00 (due 2026-06-01, 121).
+  # With credits applied oldest-first, #3 would look settled and the debt would look younger.
+  - name: test_installment_allocation_credit_then_cash
+    description: >
+      A cancellation credit settles the latest installments, cash the oldest, and what is left
+      open is the installment whose nonpayment caused the cancellation.
+    model: int_accounting__installment_allocation
+    overrides:
+      vars:
+        valuation_date: '2026-09-30'
+    given:
+      - input: ref('stg_billing__installments')
+        rows:
+          - {installment_id: 1, policy_id: 1, term_id: 10, transaction_id: 100, installment_number: 1, due_date: '2026-03-01', installment_amount: 100.00, is_test_policy: false}
+          - {installment_id: 2, policy_id: 1, term_id: 10, transaction_id: 100, installment_number: 2, due_date: '2026-04-01', installment_amount: 100.00, is_test_policy: false}
+          - {installment_id: 3, policy_id: 1, term_id: 10, transaction_id: 100, installment_number: 3, due_date: '2026-05-01', installment_amount: 100.00, is_test_policy: false}
+          - {installment_id: 4, policy_id: 1, term_id: 10, transaction_id: 100, installment_number: 4, due_date: '2026-06-01', installment_amount: 100.00, is_test_policy: false}
+          - {installment_id: 5, policy_id: 1, term_id: 10, transaction_id: 100, installment_number: 5, due_date: '2026-07-01', installment_amount: 100.00, is_test_policy: false}
+          - {installment_id: 6, policy_id: 1, term_id: 10, transaction_id: 100, installment_number: 6, due_date: '2026-08-01', installment_amount: 100.00, is_test_policy: false}
+          - {installment_id: 7, policy_id: 1, term_id: 10, transaction_id: 101, installment_number: 1, due_date: '2026-06-15', installment_amount: -250.00, is_test_policy: false}
+      - input: ref('fct_policy_transaction_lines')
+        rows:
+          - {transaction_id: 100, accounting_period: '2026-03'}
+          - {transaction_id: 101, accounting_period: '2026-06'}
+      - input: ref('int_accounting__billing_cash_events')
+        rows:
+          - {policy_id: 1, cash_amount: 100.00}
+          - {policy_id: 1, cash_amount: 100.00}
+      - input: ref('dim_accounting_periods')
+        rows:
+          - {accounting_period: '2026-09', is_valuation_period: true}
+    expect:
+      rows:
+        - {installment_id: 1, credit_applied_amount: 0.00, cash_applied_amount: 100.00, open_amount: 0.00, days_past_due: 213}
+        - {installment_id: 2, credit_applied_amount: 0.00, cash_applied_amount: 100.00, open_amount: 0.00, days_past_due: 182}
+        - {installment_id: 3, credit_applied_amount: 0.00, cash_applied_amount: 0.00, open_amount: 100.00, days_past_due: 152}
+        - {installment_id: 4, credit_applied_amount: 50.00, cash_applied_amount: 0.00, open_amount: 50.00, days_past_due: 121}
+        - {installment_id: 5, credit_applied_amount: 100.00, cash_applied_amount: 0.00, open_amount: 0.00, days_past_due: 91}
+        - {installment_id: 6, credit_applied_amount: 100.00, cash_applied_amount: 0.00, open_amount: 0.00, days_past_due: 60}

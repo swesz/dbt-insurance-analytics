@@ -1,0 +1,507 @@
+version: 2
+
+models:
+  - name: rpt_subledger_gl_reconciliation
+    description: >
+      Subledger-to-GL reconciliation per closed accounting period x line of business x GL
+      account: the amount the subledgers imply, the amount in the ledger, the difference, the
+      documented reconciling items (seeds/gl_reconciling_items.csv) and what is left
+      unexplained, with a status. Signed debit positive. Contract enforced: the close checklist
+      and the reconciliation test depend on its shape.
+    config:
+      contract:
+        enforced: true
+    data_tests:
+      - dbt_utils.unique_combination_of_columns:
+          arguments:
+            combination_of_columns: ['accounting_period', 'line_of_business', 'account_number']
+      - dbt_utils.expression_is_true:
+          arguments:
+            expression: "difference = gl_amount - subledger_amount"
+      - dbt_utils.expression_is_true:
+          arguments:
+            expression: "unexplained_difference = difference - documented_items_amount"
+    columns:
+      - name: reconciliation_key
+        description: "Primary key: 'period|line_of_business|account_number'."
+        data_type: varchar
+        constraints:
+          - type: not_null
+        data_tests:
+          - unique
+          - not_null
+      - name: accounting_period
+        description: Accounting period.
+        data_type: varchar
+        constraints:
+          - type: not_null
+        data_tests:
+          - relationships:
+              arguments:
+                to: ref('dim_accounting_periods')
+                field: accounting_period
+      - name: line_of_business
+        description: AUTO or HOME.
+        data_type: varchar
+        constraints:
+          - type: not_null
+        data_tests:
+          - accepted_values:
+              arguments:
+                values: ['AUTO', 'HOME']
+      - name: account_number
+        description: GL account.
+        data_type: varchar
+        constraints:
+          - type: not_null
+        data_tests:
+          - relationships:
+              arguments:
+                to: ref('gl_accounts')
+                field: account_number
+      - name: account_name
+        description: Account name from seeds/gl_accounts.csv.
+        data_type: varchar
+        data_tests:
+          - not_null
+      - name: account_type
+        description: ASSET, LIABILITY, REVENUE or EXPENSE.
+        data_type: varchar
+      - name: subledger_amount
+        description: Signed amount the subledgers imply (int_accounting__subledger_postings).
+        data_type: decimal(18,2)
+        constraints:
+          - type: not_null
+      - name: gl_amount
+        description: Signed net amount in the ledger (debits - credits).
+        data_type: decimal(18,2)
+        constraints:
+          - type: not_null
+      - name: difference
+        description: gl_amount - subledger_amount.
+        data_type: decimal(18,2)
+        constraints:
+          - type: not_null
+      - name: documented_items_amount
+        description: Sum of the documented reconciling items for the row, signed like difference.
+        data_type: decimal(18,2)
+        constraints:
+          - type: not_null
+      - name: documented_item_count
+        description: Number of documented reconciling items for the row.
+        data_type: integer
+        constraints:
+          - type: not_null
+      - name: unexplained_difference
+        description: difference - documented_items_amount; must be zero.
+        data_type: decimal(18,2)
+        constraints:
+          - type: not_null
+      - name: status
+        description: >
+          MATCHED (no difference, nothing documented), EXPLAINED (difference fully covered by
+          documented items) or UNEXPLAINED (anything else).
+        data_type: varchar
+        constraints:
+          - type: not_null
+        data_tests:
+          - accepted_values:
+              arguments:
+                values: ['MATCHED', 'EXPLAINED', 'UNEXPLAINED']
+
+  - name: rpt_trial_balance
+    description: >
+      Trial balance per ledger period x GL account x line of business: debits, credits and net
+      activity in the period, year-to-date activity, and the inception-to-date balance for
+      balance sheet accounts (null for income statement accounts, which close to retained
+      earnings at year end). Signed debit positive. Contract enforced.
+    config:
+      contract:
+        enforced: true
+    data_tests:
+      - dbt_utils.unique_combination_of_columns:
+          arguments:
+            combination_of_columns: ['accounting_period', 'account_number', 'line_of_business']
+      - dbt_utils.expression_is_true:
+          arguments:
+            expression: "net_activity_amount = debit_amount - credit_amount"
+      - dbt_utils.expression_is_true:
+          arguments:
+            expression: "(itd_balance_amount is null) = (statement = 'INCOME_STATEMENT')"
+    columns:
+      - name: trial_balance_key
+        description: "Primary key: 'period|account_number|line_of_business'."
+        data_type: varchar
+        constraints:
+          - type: not_null
+        data_tests:
+          - unique
+          - not_null
+      - name: accounting_period
+        description: Accounting period.
+        data_type: varchar
+        constraints:
+          - type: not_null
+        data_tests:
+          - relationships:
+              arguments:
+                to: ref('dim_accounting_periods')
+                field: accounting_period
+      - name: account_number
+        description: GL account.
+        data_type: varchar
+        constraints:
+          - type: not_null
+        data_tests:
+          - relationships:
+              arguments:
+                to: ref('gl_accounts')
+                field: account_number
+      - name: account_name
+        description: Account name.
+        data_type: varchar
+        data_tests:
+          - not_null
+      - name: account_type
+        description: ASSET, LIABILITY, REVENUE or EXPENSE.
+        data_type: varchar
+      - name: normal_balance
+        description: DEBIT or CREDIT, the side the account's balance normally sits on.
+        data_type: varchar
+      - name: statement
+        description: BALANCE_SHEET or INCOME_STATEMENT.
+        data_type: varchar
+        data_tests:
+          - not_null
+          - accepted_values:
+              arguments:
+                values: ['BALANCE_SHEET', 'INCOME_STATEMENT']
+      - name: line_of_business
+        description: AUTO or HOME.
+        data_type: varchar
+        constraints:
+          - type: not_null
+        data_tests:
+          - accepted_values:
+              arguments:
+                values: ['AUTO', 'HOME']
+      - name: debit_amount
+        description: Debits posted in the period.
+        data_type: decimal(18,2)
+        constraints:
+          - type: not_null
+      - name: credit_amount
+        description: Credits posted in the period.
+        data_type: decimal(18,2)
+        constraints:
+          - type: not_null
+      - name: net_activity_amount
+        description: debit_amount - credit_amount.
+        data_type: decimal(18,2)
+        constraints:
+          - type: not_null
+      - name: ytd_net_activity_amount
+        description: Net activity in the fiscal year through the period.
+        data_type: decimal(18,2)
+        constraints:
+          - type: not_null
+      - name: itd_balance_amount
+        description: Balance at the period end (balance sheet accounts only; null otherwise).
+        data_type: decimal(18,2)
+
+  - name: rpt_unearned_premium_rollforward
+    description: >
+      UPR rollforward per period x line of business, from the first premium period to the
+      valuation period: opening UPR + written - earned = closing UPR, and the closing UPR
+      compared with the ledger's 2100 balance (natural sign, liability positive), net of
+      documented reconciling items. GL columns are null for periods not yet closed.
+    data_tests:
+      - dbt_utils.unique_combination_of_columns:
+          arguments:
+            combination_of_columns: ['accounting_period', 'line_of_business']
+      # A closed period must have a GL balance to compare with.
+      - dbt_utils.expression_is_true:
+          arguments:
+            expression: "not is_period_closed or gl_closing_unearned_premium is not null"
+          config:
+            severity: warn
+    columns:
+      - name: rollforward_key
+        description: "Primary key: 'period|line_of_business'."
+        data_tests:
+          - unique
+          - not_null
+      - name: accounting_period
+        description: Accounting period.
+        data_tests:
+          - not_null
+      - name: line_of_business
+        description: AUTO or HOME.
+        data_tests:
+          - not_null
+          - accepted_values:
+              arguments:
+                values: ['AUTO', 'HOME']
+      - name: opening_unearned_premium
+        description: UPR at the prior period end.
+        data_tests:
+          - not_null
+      - name: written_premium
+        description: Premium written (booked) in the period.
+        data_tests:
+          - not_null
+      - name: earned_premium
+        description: Premium earned in the period.
+        data_tests:
+          - not_null
+      - name: closing_unearned_premium
+        description: UPR at the period end, from the premium subledger.
+        data_tests:
+          - not_null
+      - name: is_period_closed
+        description: True when the period closed on or before the valuation date.
+        data_tests:
+          - not_null
+      - name: gl_closing_unearned_premium
+        description: Ledger balance of 2100 at the period end, as a positive liability.
+      - name: gl_difference
+        description: gl_closing_unearned_premium - closing_unearned_premium.
+      - name: documented_items_amount
+        description: Documented reconciling items on 2100 to date, natural sign.
+      - name: unexplained_difference
+        description: gl_difference - documented_items_amount; must be zero for closed periods.
+
+  - name: rpt_loss_reserve_rollforward
+    description: >
+      Case reserve rollforward per period x line of business x cost category (LOSS, EXPENSE):
+      opening reserve + incurred - paid = closing reserve, with incurred = paid + change in
+      reserve, and the closing reserve compared with the ledger's 2200 (LOSS) or 2300 (EXPENSE)
+      balance (natural sign), net of documented reconciling items.
+    data_tests:
+      - dbt_utils.unique_combination_of_columns:
+          arguments:
+            combination_of_columns: ['accounting_period', 'line_of_business', 'cost_category']
+      - dbt_utils.expression_is_true:
+          arguments:
+            expression: "not is_period_closed or gl_closing_case_reserve is not null"
+          config:
+            severity: warn
+    columns:
+      - name: rollforward_key
+        description: "Primary key: 'period|line_of_business|cost_category'."
+        data_tests:
+          - unique
+          - not_null
+      - name: accounting_period
+        description: Accounting period.
+        data_tests:
+          - not_null
+      - name: line_of_business
+        description: AUTO or HOME.
+        data_tests:
+          - not_null
+          - accepted_values:
+              arguments:
+                values: ['AUTO', 'HOME']
+      - name: cost_category
+        description: LOSS or EXPENSE (loss adjustment expense).
+        data_tests:
+          - not_null
+          - accepted_values:
+              arguments:
+                values: ['LOSS', 'EXPENSE']
+      - name: opening_case_reserve
+        description: Outstanding case reserve at the prior period end.
+        data_tests:
+          - not_null
+      - name: paid_amount
+        description: Net paid in the period (payments - recoveries, voids reversed).
+        data_tests:
+          - not_null
+      - name: incurred_amount
+        description: paid_amount + change in case reserve.
+        data_tests:
+          - not_null
+      - name: closing_case_reserve
+        description: Outstanding case reserve at the period end.
+        data_tests:
+          - not_null
+      - name: reserve_account_number
+        description: The GL account holding the reserve, 2200 or 2300.
+        data_tests:
+          - not_null
+          - accepted_values:
+              arguments:
+                values: ['2200', '2300']
+      - name: is_period_closed
+        description: True when the period closed on or before the valuation date.
+        data_tests:
+          - not_null
+      - name: gl_closing_case_reserve
+        description: Ledger balance of the reserve account at the period end, positive liability.
+      - name: gl_difference
+        description: gl_closing_case_reserve - closing_case_reserve.
+      - name: documented_items_amount
+        description: Documented reconciling items on the reserve account to date, natural sign.
+      - name: unexplained_difference
+        description: gl_difference - documented_items_amount; must be zero for closed periods.
+
+  - name: rpt_premium_receivable
+    description: >
+      Premium receivable at each period end per line of business, inception to date: written,
+      billed and due, collected; the ledger's view of the receivable (written - collected), its
+      billed-and-due part and the not-yet-due remainder; and the comparison with the ledger's
+      1200 balance, net of documented reconciling items.
+    data_tests:
+      - dbt_utils.unique_combination_of_columns:
+          arguments:
+            combination_of_columns: ['accounting_period', 'line_of_business']
+      - dbt_utils.expression_is_true:
+          arguments:
+            expression: "receivable_amount = billed_due_receivable_amount + not_yet_due_amount"
+    columns:
+      - name: receivable_key
+        description: "Primary key: 'period|line_of_business'."
+        data_tests:
+          - unique
+          - not_null
+      - name: accounting_period
+        description: Accounting period.
+        data_tests:
+          - not_null
+      - name: period_end_date
+        description: The date the balances are at.
+        data_tests:
+          - not_null
+      - name: line_of_business
+        description: AUTO or HOME.
+        data_tests:
+          - not_null
+          - accepted_values:
+              arguments:
+                values: ['AUTO', 'HOME']
+      - name: itd_written_premium
+        description: Written premium booked in or before the period.
+        data_tests:
+          - not_null
+      - name: itd_billed_due_amount
+        description: Installments of those transactions due on or before the period end.
+        data_tests:
+          - not_null
+      - name: itd_collected_amount
+        description: Net cash collected through the period (receipts - refunds - returns).
+        data_tests:
+          - not_null
+      - name: receivable_amount
+        description: itd_written_premium - itd_collected_amount, the ledger's view of 1200.
+        data_tests:
+          - not_null
+      - name: billed_due_receivable_amount
+        description: itd_billed_due_amount - itd_collected_amount; negative when paid ahead.
+        data_tests:
+          - not_null
+      - name: not_yet_due_amount
+        description: itd_written_premium - itd_billed_due_amount, installments due later.
+        data_tests:
+          - not_null
+      - name: is_period_closed
+        description: True when the period closed on or before the valuation date.
+        data_tests:
+          - not_null
+      - name: gl_receivable_amount
+        description: Ledger balance of 1200 at the period end; null for periods not yet closed.
+      - name: gl_difference
+        description: gl_receivable_amount - receivable_amount.
+      - name: documented_items_amount
+        description: Documented reconciling items on 1200 to date.
+      - name: unexplained_difference
+        description: gl_difference - documented_items_amount; must be zero for closed periods.
+
+  - name: rpt_premium_receivable_aging
+    description: >
+      Premium receivable aging at the valuation date, one row per real policy with billing or
+      cash: receivable (billed - collected) split into current and 1-30, 31-60, 61-90 and over
+      90 days past due, after allocating credits (latest-due first, within the term) and cash
+      (oldest-due first, across the policy) to installments; plus unapplied credit.
+    data_tests:
+      # The buckets add up to the receivable.
+      - dbt_utils.expression_is_true:
+          arguments:
+            expression: >
+              receivable_amount = current_amount + past_due_1_30_amount + past_due_31_60_amount
+              + past_due_61_90_amount + past_due_over_90_amount + unapplied_credit_amount
+      # The allocation check: money left over can only be a credit, and only once nothing is
+      # open. A positive unapplied amount would mean refunds larger than what was paid.
+      - dbt_utils.expression_is_true:
+          arguments:
+            expression: "unapplied_credit_amount <= 0"
+      - dbt_utils.expression_is_true:
+          arguments:
+            expression: >
+              unapplied_credit_amount = 0
+              or current_amount + past_due_1_30_amount + past_due_31_60_amount
+              + past_due_61_90_amount + past_due_over_90_amount = 0
+    columns:
+      - name: policy_id
+        description: Primary key.
+        data_tests:
+          - unique
+          - not_null
+          - relationships:
+              arguments:
+                to: ref('dim_policies')
+                field: policy_id
+      - name: policy_number
+        description: Policy number.
+        data_tests:
+          - not_null
+      - name: line_of_business
+        description: AUTO or HOME.
+        data_tests:
+          - not_null
+      - name: valuation_date
+        description: The date the aging is at (var valuation_date).
+        data_tests:
+          - not_null
+      - name: billed_amount
+        description: Net installments billed for transactions booked by the valuation period.
+        data_tests:
+          - not_null
+      - name: collected_amount
+        description: Net cash collected to the valuation date.
+        data_tests:
+          - not_null
+      - name: receivable_amount
+        description: billed_amount - collected_amount.
+        data_tests:
+          - not_null
+      - name: current_amount
+        description: Open installments not past due (due on or after the valuation date).
+        data_tests:
+          - not_null
+      - name: not_yet_due_amount
+        description: The part of current_amount due after the valuation date.
+        data_tests:
+          - not_null
+      - name: past_due_1_30_amount
+        description: Open installments 1-30 days past due.
+        data_tests:
+          - not_null
+      - name: past_due_31_60_amount
+        description: Open installments 31-60 days past due.
+        data_tests:
+          - not_null
+      - name: past_due_61_90_amount
+        description: Open installments 61-90 days past due.
+        data_tests:
+          - not_null
+      - name: past_due_over_90_amount
+        description: Open installments more than 90 days past due.
+        data_tests:
+          - not_null
+      - name: unapplied_credit_amount
+        description: Cash or credit beyond everything billed (zero or negative).
+        data_tests:
+          - not_null
+      - name: oldest_past_due_date
+        description: Due date of the oldest open past-due installment; null when none.
