@@ -85,10 +85,10 @@ to the old session, so judge their results from `git log` and by rerunning every
 - The agent's 6 reconciling items equal the generator's expected list exactly [V, coordinator].
 - Fixed upstream: `cents_to_dollars` returned DOUBLE, and now returns DECIMAL.
 - All five agents finished. No agent is running any more.
-- Wording: the generator used a term from the external blocklist for home policies bought by auto customers. It
-  is renamed in the current files. Earlier commits still contain it, and the external blocklist
-  now fails on it, so the public-safety scan fails on history until the history is rewritten or
-  squashed before the first push (owner's choice).
+- Wording: the generator used a term from the external blocklist for home policies bought by
+  auto customers. It is renamed in the current files, but earlier commits still contain it, so
+  the public-safety scan fails on history until the history is rewritten or squashed before the
+  first push (owner's choice). Run the scan to see the affected blobs.
 
 ## Next steps, in order
 1. Confirm every agent has finished: `warehouse/RAW_READY` exists, the commits have stopped,
