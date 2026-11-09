@@ -1,0 +1,62 @@
+# Continuous integration: rebuild everything from scratch on every push and pull request.
+#
+# Because the warehouse is DuckDB and the data is generated, CI needs no credentials and no
+# warehouse: it generates the data, loads raw, and runs every dbt model and test. A pull request
+# that breaks a reconciliation fails here before anyone reviews it.
+name: ci
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    env:
+      DBT_DUCKDB_DEV_PATH: warehouse/ci.duckdb
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0 # the public-safety check scans the full history
+
+      - uses: astral-sh/setup-uv@v10
+        with:
+          enable-cache: true
+
+      - name: Install dependencies (Python version from .python-version)
+        run: uv sync --locked
+
+      - name: Public-safety check (identities, local paths, emails, forbidden files)
+        run: uv run python scripts/check_public_safety.py
+
+      - name: Generator tests
+        run: uv run pytest
+
+      - name: Generate data and load raw
+        run: |
+          uv run python -m generator
+          uv run python -m loader
+
+      - name: dbt build (models, snapshots, seeds, tests)
+        run: |
+          uv run dbt deps
+          uv run dbt build
+
+      - name: dbt docs
+        run: uv run dbt docs generate
+
+      - name: Keep the docs site and run results
+        uses: actions/upload-artifact@v7
+        with:
+          name: dbt-target
+          path: |
+            target/index.html
+            target/catalog.json
+            target/manifest.json
+            target/run_results.json
+          retention-days: 14
