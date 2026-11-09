@@ -1,0 +1,224 @@
+version: 2
+
+sources:
+  - name: claims
+    database: raw
+    schema: claims
+    description: >
+      The claims system, replicated Rivery-style as a CDC change log in append mode
+      (docs/source-systems.md, 2c and 2e). The connector never updates or deletes a row: every
+      change in the source (an insert, an update, or a hard delete) arrives as a new row, a
+      "version" of the source row. A key therefore appears once per version, and its current
+      state is the version with the latest updated_at. A hard delete arrives as a final version
+      with __deleted = true. Because the history is in the raw data already, this source needs
+      no dbt snapshot, unlike policy_admin.
+
+
+      Uniqueness does not hold here and is not tested: claim_id (or exposure_id, ...) repeats
+      once per version by design, and even (key, updated_at) repeats, because a loader rerun
+      loaded about 0.5% of versions a second time (CDC_DUPLICATE_VERSIONS in
+      docs/data-issues.md). Staging collapses those copies and picks the latest version; the
+      unique tests live on the staging models. Only tests that hold for an append-only log are
+      declared here: keys and loader metadata are never null.
+    config:
+      # Freshness asks "when did the connector last write anything?". Rivery stamps each version
+      # with _rivery_last_update when it writes it, and the claims river runs hourly, so on a
+      # working day a healthy table has a version written within a few hours. Warn after one
+      # day without a write, error after three. `dbt source freshness` compares with the wall
+      # clock, so a load of generated history (it ends on the valuation date) reports stale by
+      # design; `dbt build` does not run it.
+      loaded_at_field: _rivery_last_update
+      freshness:
+        warn_after: {count: 24, period: hour}
+        error_after: {count: 72, period: hour}
+    tables:
+      - name: claims
+        description: >
+          One row per version of a claim (a reported loss event on one policy). Policy numbers
+          are typed by hand and not always clean; codes use mixed casing; claim_status uses
+          legacy one-letter codes on versions written before 2023-07-01.
+        columns:
+          - name: claim_id
+            description: Primary key in the source; repeats here once per version.
+            data_tests:
+              - not_null
+          - name: claim_number
+            description: "Human-readable claim number, e.g. 'CL-2024-000123'."
+            data_tests:
+              - not_null
+          - name: policy_number
+            description: Policy number as typed in the claims system; not always clean.
+          - name: loss_date
+            description: Date the loss occurred.
+          - name: reported_at
+            description: When the loss was reported (first notice of loss).
+          - name: loss_cause
+            description: Cause of loss, seeds/loss_causes.csv, in inconsistent casing.
+          - name: loss_state
+            description: State where the loss occurred, in inconsistent casing.
+          - name: catastrophe_code
+            description: Catastrophe event code (seeds/catastrophe_events.csv), null if none.
+          - name: claim_status
+            description: "'OPEN', 'CLOSED', 'REOPENED', or legacy 'O', 'C', 'R'."
+          - name: closed_at
+            description: When the claim was last closed; null while open.
+          - name: adjuster_id
+            description: Adjuster assigned to the claim.
+          - name: updated_at
+            description: Source change timestamp of this version; orders the versions.
+            data_tests:
+              - not_null
+          - name: __deleted
+            description: True on the version that records a hard delete in the source.
+          - name: _rivery_last_update
+            description: When the loader wrote this version (source updated_at plus 1-90 minutes).
+            data_tests:
+              - not_null
+          - name: _rivery_run_id
+            description: "The hourly loader run that wrote this version, 'run_YYYYMMDDHH'."
+            data_tests:
+              - not_null
+          - name: _rivery_river_id
+            description: Constant per table.
+
+      - name: claim_exposures
+        description: >
+          One row per version of an exposure: one coverage and one claimant on a claim. Reserves
+          and payments are held per exposure.
+        columns:
+          - name: exposure_id
+            description: Primary key in the source; repeats here once per version.
+            data_tests:
+              - not_null
+          - name: claim_id
+            description: The claim this exposure belongs to.
+            data_tests:
+              - not_null
+          - name: coverage_code
+            description: Coverage, seeds/coverages.csv.
+          - name: claimant_type
+            description: FIRST_PARTY (our insured) or THIRD_PARTY (someone our insured harmed).
+          - name: exposure_status
+            description: OPEN or CLOSED.
+          - name: opened_at
+            description: When the exposure was opened.
+          - name: closed_at
+            description: When the exposure was last closed; null while open.
+          - name: updated_at
+            description: Source change timestamp of this version.
+            data_tests:
+              - not_null
+          - name: __deleted
+            description: True on the version that records a hard delete in the source.
+          - name: _rivery_last_update
+            description: When the loader wrote this version.
+            data_tests:
+              - not_null
+          - name: _rivery_run_id
+            description: The hourly loader run that wrote this version.
+            data_tests:
+              - not_null
+          - name: _rivery_river_id
+            description: Constant per table.
+
+      - name: claim_transactions
+        description: >
+          One row per version of a claim financial transaction: reserve changes, payments and
+          recoveries, per exposure and cost category. Rows are written once, except that a
+          voided payment is overwritten in place (transaction_status = 'VOIDED', voided_at set),
+          which creates a second version.
+        columns:
+          - name: claim_transaction_id
+            description: Primary key in the source; repeats here once per version.
+            data_tests:
+              - not_null
+          - name: claim_id
+            description: The claim.
+            data_tests:
+              - not_null
+          - name: exposure_id
+            description: The exposure the money belongs to.
+            data_tests:
+              - not_null
+          - name: transaction_type
+            description: RESERVE, PAYMENT or RECOVERY.
+            data_tests:
+              - not_null
+              - accepted_values:
+                  arguments:
+                    values: ['RESERVE', 'PAYMENT', 'RECOVERY']
+          - name: cost_category
+            description: LOSS (indemnity to the claimant) or EXPENSE (cost of handling the claim).
+            data_tests:
+              - not_null
+              - accepted_values:
+                  arguments:
+                    values: ['LOSS', 'EXPENSE']
+          - name: expense_type
+            description: DCC (defense and cost containment) or AO (adjusting and other); null for LOSS.
+          - name: reserve_reason
+            description: RESERVE rows only; INITIAL, REVISION, PAYMENT_EROSION, CLOSE, REOPEN, VOID_RESTORE.
+          - name: amount
+            description: "RESERVE: signed change to the case reserve. PAYMENT and RECOVERY: positive."
+            data_tests:
+              - not_null
+          - name: transaction_date
+            description: The date the transaction is dated (drives the accounting period).
+            data_tests:
+              - not_null
+          - name: transaction_status
+            description: POSTED or VOIDED.
+          - name: voided_at
+            description: When a payment was voided; null otherwise.
+          - name: created_at
+            description: When the transaction was entered into the system.
+            data_tests:
+              - not_null
+          - name: updated_at
+            description: Source change timestamp of this version.
+            data_tests:
+              - not_null
+          - name: __deleted
+            description: True on the version that records a hard delete in the source.
+          - name: _rivery_last_update
+            description: When the loader wrote this version.
+            data_tests:
+              - not_null
+          - name: _rivery_run_id
+            description: The hourly loader run that wrote this version.
+            data_tests:
+              - not_null
+          - name: _rivery_river_id
+            description: Constant per table.
+
+      - name: adjusters
+        description: One row per version of an adjuster (the employee who handles claims).
+        columns:
+          - name: adjuster_id
+            description: Primary key in the source; repeats here once per version.
+            data_tests:
+              - not_null
+          - name: adjuster_name
+            description: Adjuster's name (generated).
+          - name: team
+            description: AUTO_PHYSICAL_DAMAGE, AUTO_INJURY, PROPERTY or CATASTROPHE.
+          - name: is_active
+            description: False once the adjuster has left.
+          - name: hired_date
+            description: Hire date.
+          - name: updated_at
+            description: Source change timestamp of this version.
+            data_tests:
+              - not_null
+          - name: __deleted
+            description: True on the version that records a hard delete in the source.
+          - name: _rivery_last_update
+            description: When the loader wrote this version.
+            data_tests:
+              - not_null
+          - name: _rivery_run_id
+            description: The hourly loader run that wrote this version.
+            data_tests:
+              - not_null
+          - name: _rivery_river_id
+            description: Constant per table.

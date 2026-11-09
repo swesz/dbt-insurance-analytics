@@ -1,0 +1,486 @@
+version: 2
+
+models:
+  - name: stg_claims__claim_versions
+    description: >
+      Every distinct version of every claim, codes normalized. Exact re-loaded duplicates
+      (CDC_DUPLICATE_VERSIONS) are collapsed to one row per (claim_id, updated_at) with a
+      deterministic tiebreak (macros/claims_cdc_versions.sql). Deleted versions stay, flagged
+      is_deleted, so the history is complete. Primary key: (claim_id, version_number).
+    data_tests:
+      - dbt_utils.unique_combination_of_columns:
+          arguments:
+            combination_of_columns: ['claim_id', 'version_number']
+      # The real check on deduplication: after collapsing reruns, a source timestamp appears
+      # once per key.
+      - dbt_utils.unique_combination_of_columns:
+          arguments:
+            combination_of_columns: ['claim_id', 'updated_at']
+    columns:
+      - name: claim_id
+        description: Claim key; repeats once per version.
+        data_tests:
+          - not_null
+      - name: version_number
+        description: 1 for the claim's first version, then 2, 3, ... in updated_at order.
+        data_tests:
+          - not_null
+      - name: claim_number
+        description: Human-readable claim number.
+        data_tests:
+          - not_null
+      - name: policy_number
+        description: >
+          Normalized policy number, 'PA-' or 'HO-' plus seven digits. Null only if the raw value
+          does not reduce to that shape, which the not_null test reports.
+        data_tests:
+          - not_null
+      - name: source_policy_number
+        description: Policy number exactly as typed in the claims system.
+      - name: is_policy_number_malformed
+        description: True when the typed policy number differs from its normalized form.
+      - name: is_test_policy_claim
+        description: True for claims on QA test policies (policy number digits 9000000 and up).
+      - name: loss_date
+        description: Date of the loss.
+      - name: reported_at
+        description: First notice of loss.
+      - name: loss_cause
+        description: Cause of loss, upper-cased and trimmed.
+        data_tests:
+          - relationships:
+              arguments:
+                to: ref('loss_causes')
+                field: loss_cause
+      - name: loss_state
+        description: State of the loss, upper-cased and trimmed.
+        data_tests:
+          - relationships:
+              arguments:
+                to: ref('states')
+                field: state_code
+      - name: catastrophe_code
+        description: Catastrophe event code, null if none.
+        data_tests:
+          - relationships:
+              arguments:
+                to: ref('catastrophe_events')
+                field: catastrophe_code
+      - name: claim_status
+        description: OPEN, CLOSED or REOPENED, mapped from the raw value by seeds/claim_status_map.csv.
+        data_tests:
+          - not_null
+          - relationships:
+              arguments:
+                to: ref('claim_status_map')
+                field: claim_status
+      - name: is_open
+        description: True for OPEN and REOPENED.
+        data_tests:
+          - not_null
+      - name: source_claim_status
+        description: Raw status, including the legacy one-letter codes.
+      - name: closed_at
+        description: When the claim was last closed.
+      - name: adjuster_id
+        description: Assigned adjuster.
+      - name: updated_at
+        description: Start of this version's validity (source change timestamp).
+        data_tests:
+          - not_null
+      - name: valid_to
+        description: Next version's updated_at; null on the latest version.
+      - name: is_latest_version
+        description: True on the claim's current version (which may be a delete).
+        data_tests:
+          - not_null
+      - name: is_deleted
+        description: True on a version recording a hard delete.
+        data_tests:
+          - not_null
+      - name: loaded_at
+        description: When the loader wrote this version (_rivery_last_update).
+        data_tests:
+          - not_null
+      - name: load_run_id
+        description: Loader run that wrote the surviving copy of this version.
+
+  - name: stg_claims__claims
+    description: >
+      Claims in their current state, one row per claim_id: the latest version, with deleted
+      claims removed. Test-policy claims are kept and flagged.
+    columns:
+      - name: claim_id
+        description: Primary key.
+        data_tests:
+          - unique
+          - not_null
+      - name: claim_number
+        description: Human-readable claim number.
+        data_tests:
+          - unique
+          - not_null
+      - name: policy_number
+        description: Normalized policy number ('XX-0000000').
+        data_tests:
+          - not_null
+          - dbt_utils.expression_is_true:
+              arguments:
+                expression: "similar to '(PA|HO)-[0-9]{7}'"
+      - name: source_policy_number
+        description: Policy number as typed.
+      - name: is_policy_number_malformed
+        description: True when the typed value needed normalizing (MALFORMED_POLICY_NUMBERS).
+        data_tests:
+          - not_null
+      - name: is_test_policy_claim
+        description: True for claims on QA test policies.
+        data_tests:
+          - not_null
+      - name: loss_date
+        description: Date of the loss.
+        data_tests:
+          - not_null
+      - name: reported_at
+        description: First notice of loss; never before the loss.
+        data_tests:
+          - not_null
+          - dbt_utils.expression_is_true:
+              arguments:
+                expression: ">= loss_date"
+      - name: loss_cause
+        description: Normalized cause of loss.
+        data_tests:
+          - not_null
+          - relationships:
+              arguments:
+                to: ref('loss_causes')
+                field: loss_cause
+      - name: loss_state
+        description: Normalized state of the loss.
+        data_tests:
+          - not_null
+          - relationships:
+              arguments:
+                to: ref('states')
+                field: state_code
+      - name: catastrophe_code
+        description: Catastrophe event code, null if none.
+        data_tests:
+          - relationships:
+              arguments:
+                to: ref('catastrophe_events')
+                field: catastrophe_code
+      - name: claim_status
+        description: Mapped current status.
+        data_tests:
+          - not_null
+          - relationships:
+              arguments:
+                to: ref('claim_status_map')
+                field: claim_status
+      - name: is_open
+        description: True for OPEN and REOPENED.
+        data_tests:
+          - not_null
+      - name: source_claim_status
+        description: Raw status of the latest version.
+      - name: closed_at
+        description: When the claim was last closed; null while open.
+      - name: adjuster_id
+        description: Assigned adjuster.
+        data_tests:
+          - relationships:
+              arguments:
+                to: ref('stg_claims__adjusters')
+                field: adjuster_id
+      - name: version_count
+        description: Number of distinct versions the claim has had.
+      - name: updated_at
+        description: Last change in the source.
+      - name: loaded_at
+        description: When the loader wrote the latest version.
+
+  - name: stg_claims__claim_exposures
+    description: Claim exposures in their current state, one row per exposure_id, deletes removed.
+    columns:
+      - name: exposure_id
+        description: Primary key.
+        data_tests:
+          - unique
+          - not_null
+      - name: claim_id
+        description: The claim.
+        data_tests:
+          - not_null
+          - relationships:
+              arguments:
+                to: ref('stg_claims__claims')
+                field: claim_id
+      - name: coverage_code
+        description: Coverage the exposure is paid under.
+        data_tests:
+          - not_null
+          - relationships:
+              arguments:
+                to: ref('coverages')
+                field: coverage_code
+      - name: claimant_type
+        description: FIRST_PARTY or THIRD_PARTY.
+        data_tests:
+          - accepted_values:
+              arguments:
+                values: ['FIRST_PARTY', 'THIRD_PARTY']
+      - name: exposure_status
+        description: OPEN or CLOSED.
+        data_tests:
+          - not_null
+          - accepted_values:
+              arguments:
+                values: ['OPEN', 'CLOSED']
+      - name: is_open
+        description: True while the exposure is open.
+      - name: opened_at
+        description: When the exposure was opened.
+      - name: closed_at
+        description: When the exposure was last closed.
+      - name: version_count
+        description: Number of distinct versions.
+      - name: updated_at
+        description: Last change in the source.
+      - name: loaded_at
+        description: When the loader wrote the latest version.
+
+  - name: stg_claims__claim_transaction_versions
+    description: >
+      Every distinct version of every claim financial transaction. Primary key:
+      (claim_transaction_id, version_number). A voided payment has a POSTED and a VOIDED version.
+    data_tests:
+      - dbt_utils.unique_combination_of_columns:
+          arguments:
+            combination_of_columns: ['claim_transaction_id', 'version_number']
+      - dbt_utils.unique_combination_of_columns:
+          arguments:
+            combination_of_columns: ['claim_transaction_id', 'updated_at']
+    columns:
+      - name: claim_transaction_id
+        description: Transaction key; repeats once per version.
+        data_tests:
+          - not_null
+      - name: version_number
+        description: 1 for the first version, then 2, 3, ...
+        data_tests:
+          - not_null
+      - name: claim_id
+        description: The claim.
+      - name: exposure_id
+        description: The exposure.
+      - name: transaction_type
+        description: RESERVE, PAYMENT or RECOVERY.
+      - name: cost_category
+        description: LOSS or EXPENSE.
+      - name: expense_type
+        description: DCC or AO for EXPENSE.
+      - name: reserve_reason
+        description: Why a reserve changed.
+      - name: amount
+        description: Amount of this version.
+      - name: transaction_date
+        description: Accounting date of the transaction.
+      - name: transaction_status
+        description: POSTED or VOIDED in this version.
+      - name: voided_at
+        description: Void timestamp, from the VOIDED version on.
+      - name: created_at
+        description: When the transaction was entered.
+      - name: updated_at
+        description: Start of this version's validity.
+        data_tests:
+          - not_null
+      - name: valid_to
+        description: Next version's updated_at; null on the latest.
+      - name: is_latest_version
+        description: True on the current version.
+        data_tests:
+          - not_null
+      - name: is_deleted
+        description: True on a version recording a hard delete.
+        data_tests:
+          - not_null
+      - name: loaded_at
+        description: When the loader wrote this version.
+      - name: load_run_id
+        description: Loader run that wrote the surviving copy.
+
+  - name: stg_claims__claim_transactions
+    description: >
+      Claim financial transactions in their current state, one row per claim_transaction_id.
+      A voided payment appears once, as VOIDED, with its original amount and dates.
+    data_tests:
+      # Expense rows say which kind of expense; loss rows do not.
+      - dbt_utils.expression_is_true:
+          arguments:
+            expression: "(cost_category = 'EXPENSE') = (expense_type is not null)"
+      # Only reserve rows carry a reserve reason.
+      - dbt_utils.expression_is_true:
+          arguments:
+            expression: "(transaction_type = 'RESERVE') = (reserve_reason is not null)"
+      # Payment and recovery amounts are positive; the transaction type carries the sign.
+      - dbt_utils.expression_is_true:
+          arguments:
+            expression: "transaction_type = 'RESERVE' or amount > 0"
+      # voided_at is set exactly on voided rows, and only payments are voided.
+      - dbt_utils.expression_is_true:
+          arguments:
+            expression: "is_voided = (voided_at is not null)"
+      - dbt_utils.expression_is_true:
+          arguments:
+            expression: "not is_voided or transaction_type = 'PAYMENT'"
+    columns:
+      - name: claim_transaction_id
+        description: Primary key.
+        data_tests:
+          - unique
+          - not_null
+      - name: claim_id
+        description: The claim.
+        data_tests:
+          - not_null
+          - relationships:
+              arguments:
+                to: ref('stg_claims__claims')
+                field: claim_id
+      - name: exposure_id
+        description: The exposure.
+        data_tests:
+          - not_null
+          - relationships:
+              arguments:
+                to: ref('stg_claims__claim_exposures')
+                field: exposure_id
+      - name: transaction_type
+        description: RESERVE, PAYMENT or RECOVERY.
+        data_tests:
+          - not_null
+          - accepted_values:
+              arguments:
+                values: ['RESERVE', 'PAYMENT', 'RECOVERY']
+      - name: cost_category
+        description: LOSS or EXPENSE.
+        data_tests:
+          - not_null
+          - accepted_values:
+              arguments:
+                values: ['LOSS', 'EXPENSE']
+      - name: expense_type
+        description: DCC or AO for EXPENSE, null for LOSS.
+        data_tests:
+          - accepted_values:
+              arguments:
+                values: ['DCC', 'AO']
+      - name: reserve_reason
+        description: RESERVE rows only.
+        data_tests:
+          - accepted_values:
+              arguments:
+                values: ['INITIAL', 'REVISION', 'PAYMENT_EROSION', 'CLOSE', 'REOPEN', 'VOID_RESTORE']
+      - name: amount
+        description: "RESERVE: signed change. PAYMENT, RECOVERY: positive."
+        data_tests:
+          - not_null
+      - name: transaction_date
+        description: Accounting date.
+        data_tests:
+          - not_null
+      - name: transaction_status
+        description: POSTED or VOIDED.
+        data_tests:
+          - not_null
+          - accepted_values:
+              arguments:
+                values: ['POSTED', 'VOIDED']
+      - name: is_voided
+        description: True for a voided payment.
+      - name: voided_at
+        description: When the payment was voided.
+      - name: created_at
+        description: When the transaction was entered.
+        data_tests:
+          - not_null
+      - name: updated_at
+        description: Last change in the source.
+      - name: loaded_at
+        description: When the loader wrote the latest version.
+
+  - name: stg_claims__adjusters
+    description: Adjusters in their current state, one row per adjuster_id.
+    columns:
+      - name: adjuster_id
+        description: Primary key.
+        data_tests:
+          - unique
+          - not_null
+      - name: adjuster_name
+        description: Adjuster's name (generated).
+      - name: team
+        description: Claims handling team.
+        data_tests:
+          - accepted_values:
+              arguments:
+                values: ['AUTO_PHYSICAL_DAMAGE', 'AUTO_INJURY', 'PROPERTY', 'CATASTROPHE']
+      - name: is_active
+        description: False once the adjuster has left.
+      - name: hired_date
+        description: Hire date.
+      - name: updated_at
+        description: Last change in the source.
+      - name: loaded_at
+        description: When the loader wrote the latest version.
+
+unit_tests:
+  - name: test_claim_versions_collapse_reloaded_duplicates
+    description: >
+      A rerun loaded claim 1's second version twice (same updated_at, different run). The copies
+      collapse to one, the version numbers stay gapless, and the copy written last survives.
+      Claim 2's latest version is a delete: it is still the latest version, flagged is_deleted,
+      so stg_claims__claims can drop the claim.
+    model: stg_claims__claim_versions
+    given:
+      - input: source('claims', 'claims')
+        rows:
+          - {claim_id: 1, claim_number: CL-1, policy_number: 'pa-0000001', loss_date: 2024-01-05, claim_status: O, updated_at: '2024-01-06 10:00:00', __deleted: false, _rivery_last_update: '2024-01-06 10:30:00', _rivery_run_id: run_2024010610}
+          - {claim_id: 1, claim_number: CL-1, policy_number: 'pa-0000001', loss_date: 2024-01-05, claim_status: CLOSED, updated_at: '2024-02-01 09:00:00', __deleted: false, _rivery_last_update: '2024-02-01 09:20:00', _rivery_run_id: run_2024020109}
+          - {claim_id: 1, claim_number: CL-1, policy_number: 'pa-0000001', loss_date: 2024-01-05, claim_status: CLOSED, updated_at: '2024-02-01 09:00:00', __deleted: false, _rivery_last_update: '2024-02-03 04:20:00', _rivery_run_id: run_2024020304}
+          - {claim_id: 2, claim_number: CL-2, policy_number: 'HO0000002', loss_date: 2024-03-01, claim_status: OPEN, updated_at: '2024-03-02 08:00:00', __deleted: false, _rivery_last_update: '2024-03-02 08:45:00', _rivery_run_id: run_2024030208}
+          - {claim_id: 2, claim_number: CL-2, policy_number: 'HO0000002', loss_date: 2024-03-01, claim_status: OPEN, updated_at: '2024-03-04 12:00:00', __deleted: true, _rivery_last_update: '2024-03-04 12:05:00', _rivery_run_id: run_2024030412}
+      - input: ref('claim_status_map')
+        rows:
+          - {source_status: O, claim_status: OPEN, is_open: true}
+          - {source_status: OPEN, claim_status: OPEN, is_open: true}
+          - {source_status: CLOSED, claim_status: CLOSED, is_open: false}
+    expect:
+      rows:
+        - {claim_id: 1, version_number: 1, policy_number: PA-0000001, claim_status: OPEN, is_latest_version: false, is_deleted: false, load_run_id: run_2024010610}
+        - {claim_id: 1, version_number: 2, policy_number: PA-0000001, claim_status: CLOSED, is_latest_version: true, is_deleted: false, load_run_id: run_2024020304}
+        - {claim_id: 2, version_number: 1, policy_number: HO-0000002, claim_status: OPEN, is_latest_version: false, is_deleted: false, load_run_id: run_2024030208}
+        - {claim_id: 2, version_number: 2, policy_number: HO-0000002, claim_status: OPEN, is_latest_version: true, is_deleted: true, load_run_id: run_2024030412}
+
+  - name: test_claim_exposures_drop_keys_whose_latest_version_is_deleted
+    description: >
+      Exposure 10 is deleted in its latest version, so it is dropped (and its earlier version
+      must not come back). Exposure 11 was deleted and then re-created: its latest version is
+      alive, so it stays. Exposure 12 has an exact re-loaded duplicate and appears once.
+    model: stg_claims__claim_exposures
+    given:
+      - input: source('claims', 'claim_exposures')
+        rows:
+          - {exposure_id: 10, claim_id: 1, coverage_code: COLL, exposure_status: OPEN, updated_at: '2024-01-06 10:00:00', __deleted: false, _rivery_last_update: '2024-01-06 10:30:00', _rivery_run_id: run_2024010610}
+          - {exposure_id: 10, claim_id: 1, coverage_code: COLL, exposure_status: OPEN, updated_at: '2024-01-08 10:00:00', __deleted: true, _rivery_last_update: '2024-01-08 10:30:00', _rivery_run_id: run_2024010810}
+          - {exposure_id: 11, claim_id: 2, coverage_code: PD, exposure_status: OPEN, updated_at: '2024-01-06 11:00:00', __deleted: true, _rivery_last_update: '2024-01-06 11:30:00', _rivery_run_id: run_2024010611}
+          - {exposure_id: 11, claim_id: 2, coverage_code: PD, exposure_status: CLOSED, updated_at: '2024-01-09 11:00:00', __deleted: false, _rivery_last_update: '2024-01-09 11:30:00', _rivery_run_id: run_2024010911}
+          - {exposure_id: 12, claim_id: 3, coverage_code: BI, exposure_status: OPEN, updated_at: '2024-01-07 09:00:00', __deleted: false, _rivery_last_update: '2024-01-07 09:10:00', _rivery_run_id: run_2024010709}
+          - {exposure_id: 12, claim_id: 3, coverage_code: BI, exposure_status: OPEN, updated_at: '2024-01-07 09:00:00', __deleted: false, _rivery_last_update: '2024-01-07 09:10:00', _rivery_run_id: run_2024010712}
+    expect:
+      rows:
+        - {exposure_id: 11, exposure_status: CLOSED, version_count: 2}
+        - {exposure_id: 12, exposure_status: OPEN, version_count: 1}
