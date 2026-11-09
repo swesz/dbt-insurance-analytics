@@ -1,0 +1,277 @@
+version: 2
+
+models:
+  - name: dim_claims
+    description: >
+      One row per claim in its current state (deleted and test-policy claims excluded): the
+      matched policy, normalized codes, status and reopen history, data-quality flags, and the
+      claim's paid, case reserve and incurred at the valuation date.
+    data_tests:
+      # LOSS_OUTSIDE_TERM claims were all closed without payment in the source. If one of them
+      # carried a payment, either the flag or the data is wrong, and that is an error.
+      - dbt_utils.expression_is_true:
+          arguments:
+            expression: "not coalesce(is_loss_outside_term, false) or (net_paid_loss_amount = 0 and not is_open)"
+    columns:
+      - name: claim_id
+        description: Primary key.
+        data_tests:
+          - unique
+          - not_null
+      - name: claim_number
+        description: Human-readable claim number.
+        data_tests:
+          - unique
+          - not_null
+      - name: policy_number
+        description: Normalized policy number.
+        data_tests:
+          - not_null
+          # ORPHAN_CLAIMS (docs/data-issues.md): about 5 claims sit on policy numbers from a
+          # legacy book that was never migrated, so no policy matches them. They are real losses
+          # and stay in the mart, flagged has_matching_policy = false. This test keeps their
+          # count visible as a warning. More than 20 would mean something else broke (say, the
+          # policy number normalization), and fails the build.
+          # Why severity is error here: with severity: warn, dbt never evaluates error_if, so a
+          # warn test can never fail. With severity: error, dbt checks error_if first and then
+          # warn_if, which gives "warn on the planted count, fail above the threshold".
+          - relationships:
+              arguments:
+                to: ref('stg_policy_admin__policies')
+                field: policy_number
+              config:
+                severity: error
+                warn_if: ">0"
+                error_if: ">20"
+      - name: source_policy_number
+        description: Policy number as typed in the claims system.
+      - name: is_policy_number_malformed
+        description: True when the typed policy number needed normalizing.
+        data_tests:
+          - not_null
+      - name: policy_id
+        description: The matched policy; null for orphan claims.
+        data_tests:
+          - relationships:
+              arguments:
+                to: ref('stg_policy_admin__policies')
+                field: policy_id
+      - name: has_matching_policy
+        description: False for orphan claims (no policy with this number).
+        data_tests:
+          - not_null
+      - name: line_of_business
+        description: AUTO or HOME; from the policy, or the policy number prefix for orphans.
+        data_tests:
+          - not_null
+          - accepted_values:
+              arguments:
+                values: ['AUTO', 'HOME']
+      - name: loss_date
+        description: Date of the loss.
+        data_tests:
+          - not_null
+      - name: accident_year
+        description: Year of loss_date; the origin period of the loss triangle.
+        data_tests:
+          - not_null
+      - name: reported_at
+        description: First notice of loss.
+        data_tests:
+          - not_null
+      - name: report_lag_days
+        description: Days from the loss to the report.
+        data_tests:
+          - not_null
+          - dbt_utils.expression_is_true:
+              arguments:
+                expression: ">= 0"
+      - name: loss_cause
+        description: Normalized cause of loss.
+        data_tests:
+          - not_null
+          - relationships:
+              arguments:
+                to: ref('loss_causes')
+                field: loss_cause
+      - name: loss_state
+        description: Normalized state of the loss.
+        data_tests:
+          - not_null
+          - relationships:
+              arguments:
+                to: ref('states')
+                field: state_code
+      - name: catastrophe_code
+        description: Catastrophe event, null if none.
+        data_tests:
+          - relationships:
+              arguments:
+                to: ref('catastrophe_events')
+                field: catastrophe_code
+      - name: catastrophe_event_name
+        description: Name of the catastrophe event.
+      - name: is_catastrophe
+        description: True when the claim belongs to a catastrophe event.
+        data_tests:
+          - not_null
+      - name: claim_status
+        description: Current status, OPEN, CLOSED or REOPENED.
+        data_tests:
+          - not_null
+          - relationships:
+              arguments:
+                to: ref('claim_status_map')
+                field: claim_status
+      - name: is_open
+        description: True for OPEN and REOPENED.
+        data_tests:
+          - not_null
+      - name: closed_at
+        description: When the claim was last closed; null while open.
+      - name: was_reopened
+        description: True if any version of the claim had status REOPENED (REOPENED_CLAIMS).
+        data_tests:
+          - not_null
+      - name: adjuster_id
+        description: Assigned adjuster.
+        data_tests:
+          - relationships:
+              arguments:
+                to: ref('dim_adjusters')
+                field: adjuster_id
+      - name: adjuster_name
+        description: Name of the assigned adjuster.
+      - name: is_loss_outside_term
+        description: >
+          True when no in-force, uncancelled term of the matched policy covers loss_date
+          (LOSS_OUTSIDE_TERM). Null for orphan claims, which have no terms to check.
+        data_tests:
+          # LOSS_OUTSIDE_TERM (docs/data-issues.md): about 0.3% of claims have a loss date before
+          # the term started or after it was cancelled. The source closed them without payment,
+          # and they stay in the mart, flagged. Warn so the count stays visible; fail if the
+          # count is far above the planted level, which would point at a broken term match.
+          # (severity: error with warn_if and error_if, for the reason given on policy_number.)
+          - dbt_utils.expression_is_true:
+              arguments:
+                expression: "is not true"
+              config:
+                severity: error
+                warn_if: ">0"
+                error_if: ">100"
+      - name: exposure_count
+        description: Number of exposures on the claim.
+      - name: net_paid_loss_amount
+        description: Loss payments minus recoveries, booked at or before the valuation period.
+      - name: paid_expense_amount
+        description: Expense payments (DCC and AO), booked at or before the valuation period.
+      - name: case_reserve_loss_amount
+        description: Outstanding loss case reserve at the valuation period end.
+      - name: case_reserve_expense_amount
+        description: Outstanding expense case reserve at the valuation period end.
+      - name: incurred_loss_amount
+        description: net_paid_loss_amount + case_reserve_loss_amount.
+      - name: incurred_expense_amount
+        description: paid_expense_amount + case_reserve_expense_amount.
+      - name: updated_at
+        description: Last change to the claim in the source.
+
+  - name: dim_claim_exposures
+    description: >
+      One row per claim exposure (coverage x claimant) in its current state, with paid, case
+      reserve and incurred at the valuation date. Exposures of test-policy claims are excluded.
+    columns:
+      - name: exposure_id
+        description: Primary key.
+        data_tests:
+          - unique
+          - not_null
+      - name: claim_id
+        description: The claim.
+        data_tests:
+          - not_null
+          - relationships:
+              arguments:
+                to: ref('dim_claims')
+                field: claim_id
+      - name: claim_number
+        description: Human-readable claim number.
+      - name: coverage_code
+        description: Coverage.
+        data_tests:
+          - not_null
+          - relationships:
+              arguments:
+                to: ref('coverages')
+                field: coverage_code
+      - name: coverage_name
+        description: Coverage name.
+      - name: coverage_group
+        description: AUTO_LIABILITY, AUTO_PHYSICAL_DAMAGE, HOME_PROPERTY or HOME_LIABILITY.
+      - name: line_of_business
+        description: AUTO or HOME.
+        data_tests:
+          - not_null
+      - name: is_liability
+        description: True for liability coverages (BI, PD, PERS_LIAB).
+      - name: claimant_type
+        description: FIRST_PARTY or THIRD_PARTY.
+      - name: exposure_status
+        description: OPEN or CLOSED.
+      - name: is_open
+        description: True while open.
+      - name: opened_at
+        description: When the exposure was opened.
+      - name: closed_at
+        description: When the exposure was last closed.
+      - name: loss_date
+        description: Date of the claim's loss.
+      - name: accident_year
+        description: Year of loss_date.
+      - name: net_paid_loss_amount
+        description: Net loss paid at valuation.
+      - name: paid_expense_amount
+        description: Expense paid at valuation.
+      - name: case_reserve_loss_amount
+        description: Outstanding loss reserve at valuation.
+        data_tests:
+          - dbt_utils.expression_is_true:
+              arguments:
+                expression: ">= 0"
+      - name: case_reserve_expense_amount
+        description: Outstanding expense reserve at valuation.
+        data_tests:
+          - dbt_utils.expression_is_true:
+              arguments:
+                expression: ">= 0"
+      - name: incurred_loss_amount
+        description: net_paid_loss_amount + case_reserve_loss_amount.
+      - name: incurred_expense_amount
+        description: paid_expense_amount + case_reserve_expense_amount.
+      - name: updated_at
+        description: Last change in the source.
+
+  - name: dim_adjusters
+    description: One row per adjuster, with assigned and open claim counts (test claims excluded).
+    columns:
+      - name: adjuster_id
+        description: Primary key.
+        data_tests:
+          - unique
+          - not_null
+      - name: adjuster_name
+        description: Adjuster's name (generated).
+      - name: team
+        description: Claims handling team.
+        data_tests:
+          - not_null
+      - name: is_active
+        description: False once the adjuster has left.
+      - name: hired_date
+        description: Hire date.
+      - name: assigned_claim_count
+        description: Claims currently assigned (current state, any status).
+      - name: open_claim_count
+        description: Open claims currently assigned.
+      - name: updated_at
+        description: Last change in the source.

@@ -1,0 +1,188 @@
+version: 2
+
+models:
+  - name: int_claims__financial_events
+    description: >
+      One row per claim financial event (payment, recovery, reserve change, payment void),
+      booked in its accounting period by the booking rule (docs/source-systems.md 3c). A voided
+      payment stays as the original PAYMENT event in its own booked period, and a PAYMENT_VOID
+      event reverses it in the period of the void. Test-policy claims are excluded.
+    data_tests:
+      # A reversal moves paid only; a reserve change moves the reserve only.
+      - dbt_utils.expression_is_true:
+          arguments:
+            expression: "event_type = 'RESERVE_CHANGE' or reserve_change_amount = 0"
+      - dbt_utils.expression_is_true:
+          arguments:
+            expression: "event_type <> 'RESERVE_CHANGE' or paid_amount = 0"
+      # A booked period is never earlier than the month of the event date.
+      - dbt_utils.expression_is_true:
+          arguments:
+            expression: "accounting_period >= strftime(event_date, '%Y-%m')"
+    columns:
+      - name: financial_event_id
+        description: "Primary key: claim_transaction_id and event_type, e.g. '1234-PAYMENT_VOID'."
+        data_tests:
+          - unique
+          - not_null
+      - name: claim_transaction_id
+        description: Source transaction the event comes from.
+        data_tests:
+          - not_null
+      - name: event_type
+        description: PAYMENT, RECOVERY, RESERVE_CHANGE or PAYMENT_VOID.
+        data_tests:
+          - not_null
+          - accepted_values:
+              arguments:
+                values: ['PAYMENT', 'RECOVERY', 'RESERVE_CHANGE', 'PAYMENT_VOID']
+      - name: is_void_reversal
+        description: True on the reversal event of a void.
+        data_tests:
+          - not_null
+      - name: transaction_type
+        description: Source transaction type (RESERVE, PAYMENT, RECOVERY).
+      - name: claim_id
+        description: The claim.
+        data_tests:
+          - not_null
+      - name: exposure_id
+        description: The exposure.
+        data_tests:
+          - not_null
+      - name: coverage_code
+        description: Coverage of the exposure.
+        data_tests:
+          - not_null
+      - name: line_of_business
+        description: AUTO or HOME, from seeds/coverages.csv.
+        data_tests:
+          - not_null
+      - name: cost_category
+        description: LOSS or EXPENSE.
+        data_tests:
+          - not_null
+      - name: expense_type
+        description: DCC or AO for EXPENSE.
+      - name: reserve_reason
+        description: Why a reserve changed (reserve events only).
+      - name: transaction_date
+        description: The source transaction's date (for a reversal, the original payment's date).
+      - name: event_date
+        description: Date the event is dated by; for a reversal, the date of the void.
+        data_tests:
+          - not_null
+      - name: entered_at
+        description: When the event was entered; for a reversal, the void timestamp.
+        data_tests:
+          - not_null
+      - name: accounting_period
+        description: Booked period, 'YYYY-MM' (macro booked_accounting_period).
+        data_tests:
+          - not_null
+          - relationships:
+              arguments:
+                to: ref('accounting_periods')
+                field: accounting_period
+      - name: paid_amount
+        description: Signed contribution to net paid; payment +, recovery -, void -.
+        data_tests:
+          - not_null
+      - name: reserve_change_amount
+        description: Signed change to the outstanding case reserve.
+        data_tests:
+          - not_null
+      - name: loss_date
+        description: Date of the loss.
+        data_tests:
+          - not_null
+      - name: accident_year
+        description: Year of loss_date.
+        data_tests:
+          - not_null
+      - name: source_loaded_at
+        description: Latest loader write among the transaction, exposure and claim rows used.
+        data_tests:
+          - not_null
+
+  - name: int_claims__exposure_balances_by_period
+    description: >
+      Month-end balances per exposure x cost category x accounting period, from the exposure's
+      first booked period through the valuation period: the period's paid and reserve change,
+      ITD net paid, the outstanding case reserve and incurred.
+    data_tests:
+      - dbt_utils.unique_combination_of_columns:
+          arguments:
+            combination_of_columns: ['exposure_id', 'cost_category', 'accounting_period']
+    columns:
+      - name: exposure_id
+        description: The exposure.
+        data_tests:
+          - not_null
+      - name: cost_category
+        description: LOSS or EXPENSE.
+        data_tests:
+          - not_null
+      - name: accounting_period
+        description: Period the balances are at the end of.
+        data_tests:
+          - not_null
+      - name: period_end_date
+        description: Last day of the period.
+      - name: claim_id
+        description: The claim.
+      - name: coverage_code
+        description: Coverage of the exposure.
+      - name: line_of_business
+        description: AUTO or HOME.
+      - name: loss_date
+        description: Date of the loss.
+      - name: accident_year
+        description: Year of loss_date.
+      - name: period_paid_amount
+        description: Net paid booked in the period.
+      - name: period_reserve_change_amount
+        description: Reserve change booked in the period.
+      - name: itd_paid_amount
+        description: Net paid booked in or before the period.
+      - name: case_reserve_amount
+        description: Outstanding case reserve at period end.
+      - name: incurred_amount
+        description: itd_paid_amount + case_reserve_amount.
+
+unit_tests:
+  - name: test_financial_events_void_reversed_in_void_period
+    description: >
+      A 1,000 loss payment dated and entered on 2024-03-10 (with its reserve erosion) is voided
+      on 2024-05-20, after March closed on 2024-04-04. The payment must stay in 2024-03, the
+      reversal must be booked in 2024-05, and the source's VOID_RESTORE reserve row lands in
+      2024-05 too. March's net paid stays 1,000, as reported at its close.
+    model: int_claims__financial_events
+    given:
+      - input: ref('stg_claims__claim_transactions')
+        rows:
+          - {claim_transaction_id: 100, claim_id: 1, exposure_id: 10, transaction_type: RESERVE, cost_category: LOSS, reserve_reason: INITIAL, amount: 5000, transaction_date: 2024-03-02, transaction_status: POSTED, is_voided: false, voided_at: null, created_at: '2024-03-02 09:00:00', loaded_at: '2024-03-02 10:00:00'}
+          - {claim_transaction_id: 101, claim_id: 1, exposure_id: 10, transaction_type: PAYMENT, cost_category: LOSS, reserve_reason: null, amount: 1000, transaction_date: 2024-03-10, transaction_status: VOIDED, is_voided: true, voided_at: '2024-05-20 14:00:00', created_at: '2024-03-10 10:00:00', loaded_at: '2024-05-20 15:00:00'}
+          - {claim_transaction_id: 102, claim_id: 1, exposure_id: 10, transaction_type: RESERVE, cost_category: LOSS, reserve_reason: PAYMENT_EROSION, amount: -1000, transaction_date: 2024-03-10, transaction_status: POSTED, is_voided: false, voided_at: null, created_at: '2024-03-10 10:00:00', loaded_at: '2024-03-10 11:00:00'}
+          - {claim_transaction_id: 103, claim_id: 1, exposure_id: 10, transaction_type: RESERVE, cost_category: LOSS, reserve_reason: VOID_RESTORE, amount: 1000, transaction_date: 2024-05-20, transaction_status: POSTED, is_voided: false, voided_at: null, created_at: '2024-05-20 14:00:00', loaded_at: '2024-05-20 15:00:00'}
+      - input: ref('stg_claims__claim_exposures')
+        rows:
+          - {exposure_id: 10, claim_id: 1, coverage_code: COLL, loaded_at: '2024-03-02 10:00:00'}
+      - input: ref('stg_claims__claims')
+        rows:
+          - {claim_id: 1, loss_date: 2024-02-28, is_test_policy_claim: false, loaded_at: '2024-03-02 10:00:00'}
+      - input: ref('coverages')
+        rows:
+          - {coverage_code: COLL, line_of_business: AUTO}
+      - input: ref('accounting_periods')
+        rows:
+          - {accounting_period: '2024-03', period_start_date: 2024-03-01, period_end_date: 2024-03-31, close_date: 2024-04-04}
+          - {accounting_period: '2024-04', period_start_date: 2024-04-01, period_end_date: 2024-04-30, close_date: 2024-05-06}
+          - {accounting_period: '2024-05', period_start_date: 2024-05-01, period_end_date: 2024-05-31, close_date: 2024-06-06}
+    expect:
+      rows:
+        - {financial_event_id: 100-RESERVE_CHANGE, event_type: RESERVE_CHANGE, accounting_period: '2024-03', paid_amount: 0, reserve_change_amount: 5000, accident_year: 2024, line_of_business: AUTO}
+        - {financial_event_id: 101-PAYMENT, event_type: PAYMENT, accounting_period: '2024-03', paid_amount: 1000, reserve_change_amount: 0, accident_year: 2024, line_of_business: AUTO}
+        - {financial_event_id: 101-PAYMENT_VOID, event_type: PAYMENT_VOID, accounting_period: '2024-05', paid_amount: -1000, reserve_change_amount: 0, accident_year: 2024, line_of_business: AUTO}
+        - {financial_event_id: 102-RESERVE_CHANGE, event_type: RESERVE_CHANGE, accounting_period: '2024-03', paid_amount: 0, reserve_change_amount: -1000, accident_year: 2024, line_of_business: AUTO}
+        - {financial_event_id: 103-RESERVE_CHANGE, event_type: RESERVE_CHANGE, accounting_period: '2024-05', paid_amount: 0, reserve_change_amount: 1000, accident_year: 2024, line_of_business: AUTO}
