@@ -472,7 +472,9 @@ factors without them.
 
 What is deliberately not tested: identities that restate how a column is computed. In the
 calendar-period report incurred is computed as paid + reserve change, and non-catastrophe
-incurred as total minus catastrophe; pure premium is loss over exposure and frequency x
+incurred as total minus catastrophe; in the accident-year report incurred is summed from
+`dim_claims`, which defines it as paid + reserve per claim, and the catastrophe split cannot
+lose a claim because `is_catastrophe` is never null (tested on `dim_claims`); pure premium is loss over exposure and frequency x
 severity is the same fraction expanded. Tests of these could never fail, so they would look like
 evidence without being any. The YAML keeps the checks that compare two different models: the PIF
 difference must equal the policies added minus those dropped, which fails if

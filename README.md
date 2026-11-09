@@ -18,12 +18,12 @@ Each figure was checked by something other than the code that produced it.
 
 | Check | Result |
 |---|---|
-| Build | `dbt build` into empty dev and prod databases: 792 nodes each, 0 errors, under a minute each |
+| Build | `dbt build` into empty dev and prod databases: 783 nodes each, 0 errors, about a minute each |
 | Warnings | 2, both planted defects that are kept and flagged on purpose, at their exact planted counts: 13 losses outside the policy term, 5 orphan claims |
 | Control totals | all 1,056 figures the generator computed in Python (11 metrics, by period or accident year and line) equal the SQL results |
-| General ledger | 1,344 account × period × line rows (2022-01 to 2026-08): 1,338 match, 6 are the two documented reconciling items, 0 unexplained |
+| General ledger | 1,570 account × source system × period × line rows (2022-01 to 2026-08): 1,564 match, 6 are the two documented reconciling items, 0 unexplained, with no tolerance |
 | Premium | all-time written premium equals the raw transactions to the cent (auto $42,404,506.34, home $29,051,754.93), and earned plus unearned equals written exactly |
-| History | 21 month-end closes replayed in under 4 minutes; restated policies in force differ from the as-reported figure in 26 of 42 period × line rows, by −1 to +3 policies |
+| History | 21 month-end closes replayed in under 4 minutes; 20 of them (2025-01 to 2026-08) had closed by the valuation date, and restated policies in force differ from the as-reported figure in 26 of their 40 period × line rows, by −1 to +3 policies |
 | Reproducibility | two generator runs write byte-identical files |
 
 Volume: 24,316 policies, 68,558 terms, 82,236 premium transactions (290,285 coverage lines),
@@ -41,10 +41,12 @@ Accident-year loss ratios (incurred loss over earned premium, at the valuation d
 | 2026 (9 months) | 63% | 65% | 53% |
 
 Auto 2023 is high mostly because of bodily injury: that accident year has the highest bodily
-injury frequency (1.6 claims per 100 exposure years, against 1.2 in 2024) and average severity
-($22,000). The generator plants no 2023 shock, so this is random variation in a few large
-claims. 2025 and 2026 are immature: claims for those accidents are still being reported and
-their reserves still develop. The chain-ladder analysis in `analyses/` estimates how far.
+injury frequency (1.3 claims per 100 exposure years, against 1.0 in 2024) and average severity
+($27,700 per claim). The generator plants no 2023 shock, so this is random variation in a few
+large claims. 2025 and 2026 are immature: claims for those accidents are still being reported
+and their reserves still develop. The chain-ladder analysis in `analyses/` projects 2025 to
+ultimate (auto 63%, home 79%) and leaves 2026 unprojected, because that accident year is not
+over (docs/guide-claims.md section 8).
 
 ## What is in it
 
