@@ -37,33 +37,73 @@ context limit. Rewrite or delete this file before the repo becomes public.
   is_loss_outside_term, tests that could not fail removed or replaced, planted counts counted the
   generator's way) are merged into main. Each fix was checked against an independent query.
 
-## In flight: accounting fixes (branch `worktree-agent-aa978e88b094c9a17`)
-A fixer agent works in the worktree `.claude/worktrees/agent-aa978e88b094c9a17`, branched from
-c864e48, and commits there. It was told not to touch README, STATE, decisions, data-issues,
-source-systems, CLAUDE.md or .github, and to report the text it wants there. Its brief, with the
-decision already made for each:
-1. Bug: receivable aging puts a reinstated term's cancellation credit on later installments and
-   lets the reinstatement debit absorb cash, so 82 current policies show 46,182.39 past due.
-   Fix: net cancellation and reinstatement per term, apply credits within their own term first.
-   Amends D-016.
-2. Remove rollforward and aging checks that are true by construction; keep GL and control-total
-   comparisons.
-3. Add `source_system` to the reconciliation grain and to `seeds/gl_reconciling_items.csv`.
-4. `claim_frequency` counts claims, not claimants (glossary and spec).
-5. Docs: calendar incurred ties to 5000 + 5050 + 5100.
-6. 2026-09 is not closed at the valuation date, so it gets no as-reported PIF.
-7. Reconciliation tolerance 0, not 0.01 (amends D-015).
-8. Rename aging's `not_yet_due_amount` (it means something else in the receivable model).
-9. Document the close-boundary assumption of the as-reported join.
-10. Document two latent items: expense recoveries all go to 5050; a skipped close is not
-    always detected by the simulation.
-If its report was lost with the old session, read its commits (`git log main..<branch>`).
+## Accounting fixes: finished, NOT merged (branch `worktree-agent-aa978e88b094c9a17`)
+Worktree `.claude/worktrees/agent-aa978e88b094c9a17`, 9 commits on c864e48 (c0e2bab .. fb5bfbe).
+Its own results, to recheck after merging [U until rechecked]: build with and without snapshot
+history, dev and prod: 780 pass, 2 warn (planted), 0 error, 785 total on that branch alone.
+pytest 18 passed; scan 0 errors.
+- Aging (finding 1): a reinstatement debit is settled by its own term's cancellation credit
+  (new `reversed_amount` column), refunds use remaining credits, credits settle their own term
+  latest-due first, cash oldest-due first. Policies 1001 and 16789 now fully current. Past due
+  176,638.86 -> 131,111.01; reinstated policies past due 82 -> 7 (the 7 are genuinely unpaid).
+  New test `assert_aging_shows_nothing_past_due_for_paid_up_policies.sql` (fails with 75 rows on
+  the old model). Note: `amount_cents / 100.0` is DOUBLE in DuckDB; compare decimals.
+- 16 checks true by construction removed; the rollforward tests now compare with generator
+  control totals (a one-cent mutation fails 114-224 rows).
+- Reconciliation per source system: 1,570 rows, 1,564 MATCHED, 6 EXPLAINED, 0 UNEXPLAINED
+  (POLICY_ADMIN 448, BILLING 224, CLAIMS 896, MANUAL 2); the 6 equal the generator's expected
+  items. Seed gained `source_system`: an existing database needs
+  `dbt seed --full-refresh -s gl_reconciling_items` once.
+- `claim_frequency` counts claims; claimants stay as `claimant_frequency`. Auto BI 2023:
+  0.012878 per exposure year (2024: 0.010210), severity 27,716.49 per claim.
+- Tolerance macro returns 0. 2026-09 has no as-reported PIF. Aging column renamed
+  `open_not_yet_due_amount`. Close-boundary assumption, recoveries to 5050, and skipped-close
+  gap documented.
+- Decision log entries to write (renumbered; D-017..D-020 are taken):
+  - D-015 amended: "... no tolerance: every difference on the default load is 0.00 [V], and a
+    one-cent allowance would let a one-cent conversion bug pass. Supersedes 0.01 per row." Accepted.
+  - D-016 amended: the four allocation steps above; "pooling per policy showed 75 paid-up
+    reinstated policies as past due (45,212.43) while total open was right [V]". Accepted.
+  - D-021: Reconcile per source system (1000 and 1200 each receive two systems' journals, so a
+    per-account comparison lets one system's error offset another's).
+  - D-022: Claim frequency counts claims, severity is per claim (glossary, spec section 4);
+    claimants kept because BI limits are per person. Extends D-014.
+- Shared-file text it proposed:
+  - README General ledger row: "1,570 account x source system x period x line rows (2022-01 to
+    2026-08): 1,564 match, 6 are the two documented reconciling items, 0 unexplained, with no
+    tolerance".
+  - README History row: "21 month-end closes replayed in under 4 minutes; 20 of them (2025-01 to
+    2026-08) had closed by the valuation date, and restated policies in force differ from the
+    as-reported figure in 26 of their 40 period x line rows, by -1 to +3 policies".
+  - README bodily injury sentence: "(1.3 claims per 100 exposure years, against 1.0 in 2024) and
+    average severity ($27,700 per claim)".
+  - README quickstart: the simulation command needs `--fresh` after a plain `dbt build` (it
+    refuses otherwise [V by the agent]). Text: "Optional: `python
+    scripts/simulate_month_end_closes.py --start 2025-01 --end 2026-09 --fresh` replays
+    month-end closes and snapshots after each one, so the snapshots hold real history. The
+    history exists only in the database the script writes, `warehouse/dev.duckdb` by default: a
+    plain `dbt build` runs the snapshots once and records no past. To give prod the history,
+    add `--dev-path warehouse/prod.duckdb`, then run `dbt build --target prod`."
+  - data-issues.md BACKDATED_ENDORSEMENTS "Caught by": "earned and unearned premium control
+    totals; GL reconciliation of 4100 and 2100" (the UPR rollforward cannot catch a wrong
+    catch-up). Optional: "(source system MANUAL)" on GL_MANUAL_RECLASS, "(source system
+    CLAIMS)" on GL_CLAIMS_INTERFACE_TIMING.
+  - source-systems.md 3h, optional: "Every journal line carries its `source_system`; the
+    reconciliation compares per source system, because 1000 and 1200 each receive two systems'
+    journals. Every recovery in the data is a loss recovery and is posted to 5050."
+- Merge care: `docs/guide-snapshots-and-actuarial.md` section 5 hunk sits next to the claims
+  agent's edit and may conflict. `generator/README.md` (about line 115) says the expected-items
+  file has the seed's layout; no longer true (the seed has `source_system`).
+- Decision taken: after the merge, drop the accident-year YAML check "incurred = paid + reserve"
+  in `_actuarial__models.yml` (true by construction) and replace "catastrophe + non-catastrophe
+  = total" with `not_null` on `dim_claims.is_catastrophe`.
+- Small-scale risk: the new aging test fails if no reinstated policy is paid up (99 qualify at
+  scale 1.0).
 
 ## Next steps, in order
-1. Accounting branch: review its commits, then `git merge --no-ff` it. Record its decisions as
-   D-021 (reconciliation grain) and D-022 (frequency basis), and amend D-015 and D-016 (then
-   accepted, not proposed). Update data-issues.md where it names a "rollforward test" as a check
-   (BACKDATED_ENDORSEMENTS): the control totals catch that, not the rollforward.
+1. Accounting branch: review its commits, `git merge --no-ff` it, resolve any guide conflict,
+   and apply everything in the section above (decision log, shared-file text, the two YAML
+   checks).
 2. Remove the worktrees and their branches: `git worktree remove .claude/worktrees/<name>` and
    `git branch -D worktree-agent-<id>` for both agents (claims: aa12b1be805086b06, merged).
    The scanner reads every branch.
