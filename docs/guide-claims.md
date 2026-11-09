@@ -75,8 +75,12 @@ erosion, incurred would count it twice.
   reports *reported* incurred, which is paid plus case reserves. Ultimate loss = reported incurred
   + IBNR.
 
-`tests/claims/assert_incurred_equals_paid_plus_reserve.sql` checks the incurred identity on every
-balance row. It also computes the valuation-date figures two independent ways and compares them.
+`tests/claims/assert_claim_balances_match_dims_at_valuation.sql` compares the valuation-date
+figures computed two ways: as running month-end balances (`fct_claim_exposure_period_balances`)
+and as one direct sum (`dim_claims`, `dim_claim_exposures`). It compares paid loss, paid expense,
+loss reserve and expense reserve each on its own, so two errors that cancel out inside incurred
+cannot hide. Incurred = paid + reserve is how every model defines incurred, so the identity
+itself needs no test.
 
 ## 5. Booking: which month does a transaction belong to?
 
