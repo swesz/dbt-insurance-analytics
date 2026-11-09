@@ -25,7 +25,7 @@ normalized as (
     from distinct_versions
 ),
 
-final as (
+cleaned as (
     select
         normalized.claim_id,
         normalized.version_number,
@@ -62,7 +62,8 @@ final as (
         on upper(trim(normalized.claim_status)) = claim_status_map.source_status
 ),
 
-flagged as (
+-- The flags compare and parse the cleaned values, so they come after the cleaning step.
+final as (
     select
         *,
         -- The raw value differs from the clean one (whitespace, case or a missing dash).
@@ -71,7 +72,7 @@ flagged as (
         -- digits are the policy_id (docs/source-systems.md 3h). That lets staging flag test
         -- claims from the claim row alone, without joining to policies.
         coalesce(cast(right(policy_number, 7) as integer) >= 9000000, false) as is_test_policy_claim
-    from final
+    from cleaned
 )
 
-select * from flagged
+select * from final
