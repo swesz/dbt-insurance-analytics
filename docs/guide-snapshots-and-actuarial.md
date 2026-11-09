@@ -257,8 +257,11 @@ the accident happened.
 calendar-period incurred = net paid in the period + change in case reserves in the period
 ```
 
-It is what the income statement shows (accounts 5000 and 5100) and never changes once the period
-is closed. But it mixes years: raising the reserve on a 2023 injury claim by $50,000 in June 2026
+It is what the income statement shows: accounts 5000 (losses paid, gross), 5050 (salvage and
+subrogation recovered, a credit that brings paid down to net paid) and 5100 (change in loss
+reserves). In every closed period it equals 5000 + 5050 + 5100 in the ledger, apart from the
+2025-08 claims interface timing item; without 5050 it would be off by every recovery. It never
+changes once the period is closed. But it mixes years: raising the reserve on a 2023 injury claim by $50,000 in June 2026
 puts $50,000 into June 2026's loss ratio.
 
 **Accident year** (`rpt_loss_ratio_by_accident_year`): the losses of accidents that happened in

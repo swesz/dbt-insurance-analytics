@@ -8,8 +8,10 @@
 -- Why "change in reserve" and not the reserve itself: incurred to date is paid to date plus the
 -- outstanding reserve (docs/source-systems.md 3f). Take that at the end of this period minus the
 -- same at the end of the prior period and the result is this period's paid plus this period's
--- reserve change. It is the figure the ledger shows (5000 Losses paid + 5100 Change in loss
--- reserves), and it mixes accident years: a reserve increase on a 2023 bodily injury claim
+-- reserve change. It is the figure the ledger shows: 5000 Losses paid (gross payments) + 5050
+-- Salvage and subrogation (recoveries, a credit, so signed negative) + 5100 Change in loss
+-- reserves. Net paid is payments minus recoveries, so leaving out 5050 would overstate it by
+-- every recovery. It mixes accident years: a reserve increase on a 2023 bodily injury claim
 -- lands in today's calendar period. rpt_loss_ratio_by_accident_year sorts losses by when the
 -- accident happened instead.
 --
