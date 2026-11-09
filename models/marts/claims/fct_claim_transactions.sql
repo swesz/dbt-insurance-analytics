@@ -24,13 +24,20 @@
 
     Which rows a run rebuilds: the ones whose source_loaded_at (the latest loader write among
     the transaction, exposure and claim rows the event is built from) is no older than the
-    newest one already in the target, minus a lookback window. The window exists because the
-    loader timestamp is not a perfect high-water mark: _rivery_last_update is the source change
-    time plus 1-90 minutes, runs are hourly, and a rerun can write a version whose timestamp is
-    older than rows already loaded (CDC_DUPLICATE_VERSIONS came from such a rerun). A version
-    that arrives late with an older timestamp would be skipped by a strict "newer than the max"
-    filter. Re-processing a few days of events costs little, and delete+insert makes the overlap
-    harmless. Override the window with --vars '{claims_incremental_lookback_days: 7}'.
+    newest one already in the target, minus a lookback window.
+
+    Why the window: a strict "newer than the max" filter is safe only if no row reaches the
+    warehouse after a row with a later loader timestamp. With this data that holds. The loader
+    shows every row with _rivery_last_update <= as_of, so a later load only adds rows stamped
+    after the previous as-of, newer than anything already in the target. The rerun copies
+    behind CDC_DUPLICATE_VERSIONS are stamped later than the version they copy (1 hour to
+    3 days later), not earlier. A real pipeline does not always guarantee that order: a batch
+    can be stamped when it starts and committed after a later one, parallel workers can commit
+    out of order, a backfill can write rows with old timestamps. Such a row would sit below the
+    high-water mark and be skipped by every later run. The window is a safeguard against late
+    or out-of-order delivery like that. Here it only re-processes a few days of unchanged
+    events, which costs little, and delete+insert makes the overlap harmless. Override it with
+    --vars '{claims_incremental_lookback_days: 7}'.
 
     What incremental runs cannot do: remove an event whose source disappeared (a hard-deleted
     transaction, or a claim later found to be a test claim). delete+insert only replaces keys
