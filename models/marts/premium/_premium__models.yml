@@ -198,6 +198,10 @@ models:
       - dbt_utils.expression_is_true:
           arguments:
             expression: "is_in_force = (in_force_term_id is not null)"
+      # Every covered policy-month has something insured, so exposure is never zero.
+      - dbt_utils.expression_is_true:
+          arguments:
+            expression: "exposure_units >= 1 and earned_exposure_years > 0"
     columns:
       - name: policy_period_key
         description: Surrogate key of policy_id and accounting_period.
@@ -252,7 +256,9 @@ models:
           In-force premium at an annual rate: each line's premium per day of its window, times
           365. Mid-term changes count at their full rate, not pro rata.
       - name: exposure_units
-        description: Vehicles (AUTO) or dwellings (HOME) on the policy at the period end.
+        description: >
+          Vehicles (AUTO) or dwellings (HOME) on the policy. The source keeps only the current
+          list, without add or remove dates, so the current count applies to every month.
         data_tests:
           - not_null
       - name: in_force_exposure_units

@@ -60,6 +60,10 @@ term_periods as (
     inner join periods
         on terms.term_effective_date <= periods.period_end_date
         and terms.coverage_end_date > periods.period_start_date
+    -- A flat cancellation (cancelled on its first day) has coverage_end_date equal to its
+    -- effective date. Without this filter, one starting mid-month would still pass the two
+    -- overlap conditions above and get a row with zero covered days.
+    where terms.covered_days > 0
 ),
 
 policy_periods as (
@@ -96,22 +100,20 @@ in_force_premium as (
     group by 1, 2
 ),
 
--- Exposure units on the policy at each period end. The source has no removal dates, so a
--- unit counts from the day it was added (created_at) and stays.
-unit_periods as (
+-- Exposure units: the vehicles (AUTO) or the dwelling (HOME) on the policy. The source keeps
+-- only the current list, with no dates for adding or removing a unit, and a unit's created_at
+-- is when the policy was keyed in (which can be days after coverage started), so it says
+-- nothing about when the unit was exposed. The current count is used for every month.
+policy_units as (
     select
-        policy_periods.policy_id,
-        policy_periods.accounting_period,
-        count(units.unit_id) as exposure_units
-    from policy_periods
-    inner join (
-        select policy_id, vehicle_id as unit_id, created_at from vehicles
+        policy_id,
+        count(*) as exposure_units
+    from (
+        select policy_id from vehicles
         union all
-        select policy_id, dwelling_id as unit_id, created_at from dwellings
+        select policy_id from dwellings
     ) as units
-        on policy_periods.policy_id = units.policy_id
-        and cast(units.created_at as date) <= policy_periods.period_end_date
-    group by 1, 2
+    group by 1
 ),
 
 final as (
@@ -130,15 +132,15 @@ final as (
             as in_force_term_premium,
         cast(round(coalesce(in_force_premium.annualized_in_force_premium, 0), 2) as decimal(18, 2))
             as annualized_in_force_premium,
-        cast(coalesce(unit_periods.exposure_units, 0) as integer) as exposure_units,
+        cast(coalesce(policy_units.exposure_units, 0) as integer) as exposure_units,
         cast(
-            case when policy_periods.is_in_force then coalesce(unit_periods.exposure_units, 0) else 0 end
+            case when policy_periods.is_in_force then coalesce(policy_units.exposure_units, 0) else 0 end
         as integer) as in_force_exposure_units,
         cast(policy_periods.covered_days as integer) as covered_days,
         -- Earned exposure: unit-days of coverage in the month, in years. One vehicle insured
         -- all year is one car-year. 365 days per year is the usual convention.
         cast(
-            round(policy_periods.covered_days * coalesce(unit_periods.exposure_units, 0) / 365.0, 6)
+            round(policy_periods.covered_days * coalesce(policy_units.exposure_units, 0) / 365.0, 6)
         as decimal(18, 6)) as earned_exposure_years
     from policy_periods
     inner join policies
@@ -146,9 +148,8 @@ final as (
     left join in_force_premium
         on policy_periods.policy_id = in_force_premium.policy_id
         and policy_periods.accounting_period = in_force_premium.accounting_period
-    left join unit_periods
-        on policy_periods.policy_id = unit_periods.policy_id
-        and policy_periods.accounting_period = unit_periods.accounting_period
+    left join policy_units
+        on policy_periods.policy_id = policy_units.policy_id
 )
 
 select * from final
