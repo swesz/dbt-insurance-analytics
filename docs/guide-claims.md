@@ -210,8 +210,10 @@ way, for example from an expected loss ratio on the premium earned so far.)
 
 ## 9. Worked example: one claim, month by month
 
-Claim CL-2024-000123: a collision on 2024-03-02, one `COLL` exposure. Loss cost category only, to
-keep it short. The April period closes on 2024-05-06.
+Claim CL-2024-999999, a made-up claim: the generated claims are numbered from 000001 in each year,
+and 2024 has fewer than a thousand, so no real claim has this number. It is a collision on
+2024-03-02 with one `COLL` exposure. Loss cost category only, to keep it short. The April period
+closes on 2024-05-06.
 
 | # | date | source row | event(s) in `int_claims__financial_events` | booked | paid_amount | reserve_change_amount |
 |---|---|---|---|---|---|---|
@@ -251,7 +253,8 @@ What to notice:
 - The balances continue after the claim closes. A balance is a stock, so a month without activity
   still has one, and the sums over all exposures for any month need every exposure's row.
 - In the triangle, this claim contributes to accident year 2024: paid 4,700, incurred 4,700 and
-  one reported claim at age 12 (2024-12-31) and every later age.
+  one reported claim at age 12 (2024-12-31) and every later age of the `ANNUAL` grain, and from
+  age 9 (2024-09-30) in the `ANNUAL_AT_VALUATION` grain.
 
 ## 10. Data defects the claims models handle
 
@@ -268,9 +271,17 @@ What to notice:
 | `LATE_ENTERED_TRANSACTIONS` | the booking macro, through `int_claims__financial_events` |
 | test-policy claims | flagged in staging (`is_test_policy_claim`), excluded from intermediate and marts |
 
-`tests/claims/assert_claims_planted_issue_counts.sql` checks that each handled count equals what the
-generator planted. The two control-total tests compare paid, reserves, claim counts and incurred
-with the generator's independent Python figures.
+`tests/claims/assert_claims_planted_issue_counts.sql` compares the counts of six of these defects
+with what the generator planted: `DELETED_CLAIMS`, `CDC_DUPLICATE_VERSIONS`,
+`MALFORMED_POLICY_NUMBERS`, `ORPHAN_CLAIMS`, `LOSS_OUTSIDE_TERM` and `REOPENED_CLAIMS`. The others
+are checked another way: legacy status codes and inconsistent casing by relationships tests of
+the cleaned values against the seeds; voided payments and late entries by the period control
+totals, the GL reconciliation and the unit tests of the void reversal
+(`test_financial_events_void_reversed_in_void_period`) and the booking rule
+(`test_booking_rule_periods`); test-policy claims, which no claims mart includes, by the control
+totals and the GL reconciliation, which would both be off if one slipped in. The two
+control-total tests compare paid, reserves, claim counts and incurred with the generator's
+independent Python figures.
 
 ### Why `is_loss_outside_term` is null for orphan claims
 
