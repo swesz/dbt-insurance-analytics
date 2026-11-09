@@ -161,10 +161,15 @@ opening UPR + written - earned = closing UPR          (the subledger ties)
 closing UPR = GL 2100 balance - documented items      (the ledger agrees)
 ```
 
-The first line is the premium subledger's own consistency. The second says the ledger's 2100,
-which only ever received the monthly "increase in UPR" postings, adds up to the liability the
-policies say we owe. Read across a row: the opening liability, what was added by selling
-coverage, what was released by providing it, and what is left.
+The first line is the premium subledger's own consistency: written, earned and closing are
+separate columns of `fct_premium_by_policy_period`, so it can fail (tests/premium checks it per
+policy and coverage). The opening is simply the prior row's closing, which is not tested
+because it cannot differ. The second line is the evidence: the ledger's 2100, which only ever
+received the monthly "increase in UPR" postings, adds up to the liability the policies say we
+owe. `assert_unearned_premium_rollforward_ties_to_gl.sql` also compares written, earned and
+closing UPR with the generator's control totals, computed in Python from its own records. Read
+across a row: the opening liability, what was added by selling coverage, what was released by
+providing it, and what is left.
 
 ### Case reserve rollforward (`rpt_loss_reserve_rollforward`)
 
@@ -177,6 +182,15 @@ period's cost of claims. A payment that erodes the reserve by the same amount le
 unchanged: the cost was recognized when the reserve was set. A reserve increase raises
 incurred although no money moved. Paid is net of recoveries, with voided payments reversed in
 the month of the void.
+
+Unlike the UPR rollforward, this one foots by definition: the report computes incurred as paid
+plus the change in reserve, and the opening as the closing minus that change, so "opening +
+incurred - paid = closing" cannot fail and is not tested. A test of it would look like evidence
+and prove nothing. What `assert_loss_reserve_rollforward_ties_to_gl.sql` checks instead is the
+closing reserve against the ledger's 2200 / 2300 in every closed period, and the closing
+reserve and paid against the generator's control totals. (It also compares the closing reserve
+with `fct_claim_exposure_period_balances`. Both are built from `int_claims__financial_events`,
+so that part checks aggregation and the incremental claims fact, not the booking.)
 
 ### Premium receivable and aging (`rpt_premium_receivable`, `rpt_premium_receivable_aging`)
 
@@ -313,8 +327,9 @@ Two other things the ledger checks turned up:
   which stays DECIMAL), and every term ties to the cent. This is the rule from section 4 in
   practice: a difference caused by a bug is fixed, never documented.
 
-The rollforwards agree with the ledger in every closed period, and with the generator's own
-control totals. For 2025-08, AUTO: UPR 4,009,500.90 + 1,170,585.42 written - 1,042,830.87
+The rollforwards' closing balances agree with the ledger in every closed period, and their
+written, earned, paid and closing figures with the generator's own control totals in every
+period. For 2025-08, AUTO: UPR 4,009,500.90 + 1,170,585.42 written - 1,042,830.87
 earned = 4,137,255.45, equal to the ledger's 2100 balance; case reserve (LOSS) 2,831,097.88 +
 757,524.00 incurred - 403,479.85 paid = 3,185,142.03, equal to the ledger's 2200 balance.
 

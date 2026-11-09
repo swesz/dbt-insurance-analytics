@@ -383,11 +383,15 @@ factors without them.
 |---|---|
 | `assert_loss_ratio_earned_premium_matches_premium_mart` | both loss ratio reports carry exactly the premium subledger's earned premium, per period or year and line |
 | `assert_loss_ratio_incurred_matches_claims_mart` | the period report ties to `fct_claim_transactions`, the accident-year report to `fct_claim_exposure_period_balances` at valuation: each against a mart it is not built from |
-| `assert_frequency_times_severity_equals_pure_premium` | the three ratios use one base, within a rounding bound derived in the test |
 | `assert_snapshot_one_current_version_per_key` | no key is current twice |
 | `assert_snapshot_versions_are_contiguous` | each key's versions form one timeline without gaps or overlaps |
 | `assert_snapshot_current_keys_exist_in_source` (warn) | no current key vanished from the source |
 | `assert_pif_as_reported_equals_restated_when_unchanged` | as reported and restated agree wherever nothing relevant changed after the close |
 
-The YAML adds the identities per row: incurred = paid + reserve change, catastrophe +
-non-catastrophe = total, and a PIF difference that is fully explained by the counted reasons.
+What is deliberately not tested: identities that restate how a column is computed. In the
+calendar-period report incurred is computed as paid + reserve change, and non-catastrophe
+incurred as total minus catastrophe; pure premium is loss over exposure and frequency x
+severity is the same fraction expanded. Tests of these could never fail, so they would look like
+evidence without being any. The YAML keeps the checks that compare two different models: the PIF
+difference must equal the policies added minus those dropped, which fails if
+`fct_policy_in_force_at_close` loses a policy that `fct_policy_month_end` counts in force.

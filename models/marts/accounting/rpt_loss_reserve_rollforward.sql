@@ -7,6 +7,11 @@
 --
 --     incurred = paid + (closing - opening),   so   opening + incurred - paid = closing.
 --
+-- Both are definitions here (the columns are computed that way), so the rollforward foots by
+-- construction and testing it would prove nothing. What can fail, and is tested
+-- (tests/accounting/assert_loss_reserve_rollforward_ties_to_gl.sql), is the closing balance and
+-- paid against two independent records: the ledger and the generator's control totals.
+--
 -- A payment usually erodes the reserve by the same amount, so a payment alone does not change
 -- incurred; a reserve increase does, even though no money moved. paid is net paid: payments
 -- minus recoveries, with a voided payment reversed in the month of the void

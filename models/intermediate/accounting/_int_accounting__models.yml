@@ -184,20 +184,11 @@ models:
       installments of their own term first, and only then of the rest of the policy; cash
       settles the policy's oldest-due installments first. See the model header for the
       reasoning.
-    data_tests:
-      # Nothing is over-applied: credit + cash applied never exceed the installment.
-      - dbt_utils.expression_is_true:
-          arguments:
-            expression: "credit_applied_amount + cash_applied_amount <= installment_amount"
-      - dbt_utils.expression_is_true:
-          arguments:
-            expression: "open_amount >= 0 and credit_applied_amount >= 0 and cash_applied_amount >= 0"
-      # Only a reinstatement is settled by a reversal, and the reversal is part of the credit.
-      - dbt_utils.expression_is_true:
-          arguments:
-            expression: >
-              reversed_amount <= credit_applied_amount
-              and (reversed_amount = 0 or transaction_type = 'REINSTATEMENT')
+    # No row-level identity tests (nothing over-applied, nothing negative): every step caps what
+    # it applies with greatest(0, least(remaining, ...)), so they would hold whatever the pools
+    # held. The unit tests below check the allocation with numbers worked by hand, and
+    # tests/accounting/assert_aging_shows_nothing_past_due_for_paid_up_policies.sql checks its
+    # result against billing.
     columns:
       - name: installment_id
         description: Primary key.

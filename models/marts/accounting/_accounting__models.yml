@@ -11,16 +11,13 @@ models:
     config:
       contract:
         enforced: true
+    # No identity tests on difference = gl - subledger or unexplained = difference - documented:
+    # the model computes the columns that way, so such tests could never fail. The evidence is
+    # tests/accounting/assert_reconciliation_has_no_unexplained_difference.sql.
     data_tests:
       - dbt_utils.unique_combination_of_columns:
           arguments:
             combination_of_columns: ['accounting_period', 'line_of_business', 'account_number']
-      - dbt_utils.expression_is_true:
-          arguments:
-            expression: "difference = gl_amount - subledger_amount"
-      - dbt_utils.expression_is_true:
-          arguments:
-            expression: "unexplained_difference = difference - documented_items_amount"
     columns:
       - name: reconciliation_key
         description: "Primary key: 'period|line_of_business|account_number'."
@@ -118,16 +115,13 @@ models:
     config:
       contract:
         enforced: true
+    # Debits = credits is checked across accounts in
+    # tests/accounting/assert_trial_balance_balances.sql. Per-row identities (net = debit -
+    # credit, a balance only for balance sheet accounts) restate how the columns are computed.
     data_tests:
       - dbt_utils.unique_combination_of_columns:
           arguments:
             combination_of_columns: ['accounting_period', 'account_number', 'line_of_business']
-      - dbt_utils.expression_is_true:
-          arguments:
-            expression: "net_activity_amount = debit_amount - credit_amount"
-      - dbt_utils.expression_is_true:
-          arguments:
-            expression: "(itd_balance_amount is null) = (statement = 'INCOME_STATEMENT')"
     columns:
       - name: trial_balance_key
         description: "Primary key: 'period|account_number|line_of_business'."
@@ -356,9 +350,10 @@ models:
       - dbt_utils.unique_combination_of_columns:
           arguments:
             combination_of_columns: ['accounting_period', 'line_of_business']
-      - dbt_utils.expression_is_true:
-          arguments:
-            expression: "receivable_amount = billed_due_receivable_amount + not_yet_due_amount"
+    # receivable = billed-and-due part + not-yet-due part holds by algebra ((W - C) = (B - C) +
+    # (W - B)), so it is not tested. The receivable is checked against the ledger's 1200 and
+    # against the aging, which is built from billing installments instead of written premium
+    # (tests/accounting/assert_premium_receivable_ties_to_gl_and_aging.sql).
     columns:
       - name: receivable_key
         description: "Primary key: 'period|line_of_business'."
@@ -429,13 +424,12 @@ models:
       (int_accounting__installment_allocation: a reinstatement settled by the cancellation it
       reverses, credits not paid out as refunds latest-due first within their own term, cash
       oldest-due first); plus unapplied credit.
+    # "The buckets add up to the receivable" is not tested: unapplied_credit_amount is defined as
+    # the receivable minus the open buckets, so it would hold whatever the allocation did. The
+    # two tests below can fail, and so can
+    # tests/accounting/assert_aging_shows_nothing_past_due_for_paid_up_policies.sql, which checks
+    # the buckets themselves.
     data_tests:
-      # The buckets add up to the receivable.
-      - dbt_utils.expression_is_true:
-          arguments:
-            expression: >
-              receivable_amount = current_amount + past_due_1_30_amount + past_due_31_60_amount
-              + past_due_61_90_amount + past_due_over_90_amount + unapplied_credit_amount
       # The allocation check: money left over can only be a credit, and only once nothing is
       # open. A positive unapplied amount would mean refunds larger than what was paid.
       - dbt_utils.expression_is_true:

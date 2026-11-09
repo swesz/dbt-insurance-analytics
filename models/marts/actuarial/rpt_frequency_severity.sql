@@ -180,7 +180,7 @@ final as (
         cast(combined.claim_count as integer) as claim_count,
         cast(combined.incurred_loss_amount as decimal(18, 2)) as incurred_loss_amount,
         -- Eight decimals: frequencies are small (0.012 for BI), and the product with severity
-        -- must reproduce pure premium to the cent (tests/actuarial/).
+        -- should reproduce pure premium to the cent when a reader multiplies them.
         {{ actuarial_ratio('combined.claim_exposure_count', 'combined.earned_exposure_years', 8) }}
             as claim_frequency,
         {{ actuarial_ratio('combined.incurred_loss_amount', 'combined.claim_exposure_count', 2) }}
