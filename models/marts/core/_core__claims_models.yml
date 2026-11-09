@@ -7,11 +7,13 @@ models:
       matched policy, normalized codes, status and reopen history, data-quality flags, and the
       claim's paid, case reserve and incurred at the valuation date.
     data_tests:
-      # LOSS_OUTSIDE_TERM claims were all closed without payment in the source. If one of them
-      # carried a payment, either the flag or the data is wrong, and that is an error.
+      # A loss outside the policy term is not covered, so it must not be paid. If one carried a
+      # payment, either the flag or the data is wrong, and that is an error. Whether such a claim
+      # is still open is a timing state, not a rule: one reported shortly before the valuation
+      # date can still be open (it happens on other generator seeds).
       - dbt_utils.expression_is_true:
           arguments:
-            expression: "not coalesce(is_loss_outside_term, false) or (net_paid_loss_amount = 0 and not is_open)"
+            expression: "not coalesce(is_loss_outside_term, false) or net_paid_loss_amount = 0"
       # is_loss_outside_term is unknown (null) exactly when there is no policy to check the loss
       # date against: null for every orphan claim, and never null for a claim with a policy.
       # Coalescing orphans to true or false would break this (docs/guide-claims.md section 10).

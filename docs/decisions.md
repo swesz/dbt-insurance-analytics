@@ -84,8 +84,10 @@ IDs are permanent and never reused. Status: proposed, accepted, superseded (by D
 ## D-010: fct_claim_transactions is incremental with delete+insert and a loader-time lookback
 - Status: accepted 2026-11-08
 - Unique key `financial_event_id`; each run rebuilds the events whose source rows were loaded
-  within `claims_incremental_lookback_days` (3) of the last high-water mark, so late-arriving
-  CDC rows and voids are picked up. delete+insert was chosen over merge for its simpler, fully
+  within `claims_incremental_lookback_days` (3) of the last high-water mark, as a safeguard for
+  rows a pipeline delivers late or out of order. With this data a strict high-water mark misses
+  nothing (a 0-day lookback matched a full rebuild [V, claims fix]), so the window only
+  re-processes unchanged events. delete+insert was chosen over merge for its simpler, fully
   replaced key set; the reasoning is in the model's header.
 - Check: `assert_fct_claim_transactions_matches_events` compares the fact with a full rebuild on
   every build. A full refresh and repeated incremental runs gave identical results [V, claims build].
@@ -100,6 +102,8 @@ IDs are permanent and never reused. Status: proposed, accepted, superseded (by D
 - Status: accepted 2026-11-08
 - A cell at age n holds what was booked by the end of that evaluation period, so the triangle
   agrees with the ledger. It includes orphan claims and excludes expenses.
+- Three grains: `ANNUAL` (year ends), `QUARTERLY`, and `ANNUAL_AT_VALUATION` (the valuation date
+  and its anniversaries, D-019).
 
 ## D-013: Snapshot configuration
 - Status: accepted 2026-11-08
@@ -148,3 +152,22 @@ IDs are permanent and never reused. Status: proposed, accepted, superseded (by D
   test exists for: one day of a $60 coverage is 33 cents.
 - A guard test fails when the load is the default one but no control totals match its as_of,
   so the comparisons cannot pass by being skipped.
+
+## D-019: The chain ladder projects from the valuation date; the current accident year is not
+- Status: accepted 2026-11-08
+- The year-end `ANNUAL` triangle's latest diagonal was 2025-12-31, so IBNR was measured from
+  9-month-old incurred and accident year 2026 was missing. The triangle adds
+  `ANNUAL_AT_VALUATION` (ages 9, 21, 33, ... for a September valuation) and the analysis uses
+  it, so IBNR = ultimate - incurred at the valuation date.
+- An accident year younger than 12 months gets no ultimate or IBNR: its 9-to-21-month factor is
+  mostly October-December accidents arriving (auto 1.4775 = 1.0285 development + 0.4490 new
+  accidents [V, claims fix]), which belong to unearned premium, not to a reserve.
+- Rejected: rolling up quarterly cells, which works only for quarter-end valuation dates.
+  Check: `assert_triangle_latest_diagonal_matches_control_totals`.
+
+## D-020: is_loss_outside_term is null for orphan claims
+- Status: accepted 2026-11-08
+- With no policy there is no term to check. True would merge ORPHAN_CLAIMS into
+  LOSS_OUTSIDE_TERM and report a check never made; false would assert coverage nobody verified.
+  Pinned by the test `(is_loss_outside_term is null) = (not has_matching_policy)`.
+- Filter with `is not true`: `where not is_loss_outside_term` silently drops the 5 orphans.
