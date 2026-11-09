@@ -12,7 +12,9 @@
 --   billed_due_receivable_amount  billed and due - collected: what is owed now. Negative when
 --                               customers paid ahead of their due dates
 --   not_yet_due_amount          written - billed and due: installments scheduled after the
---                               period end, a receivable that is not yet collectible
+--                               period end, a receivable that is not yet collectible. Gross:
+--                               cash paid ahead lowers billed_due_receivable_amount, not this
+--                               (the aging's open_not_yet_due_amount is the net figure)
 -- so receivable_amount = billed_due_receivable_amount + not_yet_due_amount.
 --
 -- An insurer books the whole term's premium as written on day one, even on a monthly plan, so

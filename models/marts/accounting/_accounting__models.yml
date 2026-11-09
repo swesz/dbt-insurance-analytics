@@ -401,7 +401,11 @@ models:
         data_tests:
           - not_null
       - name: not_yet_due_amount
-        description: itd_written_premium - itd_billed_due_amount, installments due later.
+        description: >
+          itd_written_premium - itd_billed_due_amount: premium written whose installments fall
+          due after the period end, gross (before any cash is allocated, so cash paid ahead does
+          not lower it; it shows in billed_due_receivable_amount instead). Not the same as the
+          aging's open_not_yet_due_amount, which is net of allocated cash and credits.
         data_tests:
           - not_null
       - name: is_period_closed
@@ -481,8 +485,12 @@ models:
         description: Open installments not past due (due on or after the valuation date).
         data_tests:
           - not_null
-      - name: not_yet_due_amount
-        description: The part of current_amount due after the valuation date.
+      - name: open_not_yet_due_amount
+        description: >
+          The part of current_amount due after the valuation date: installments scheduled later
+          that are still open after credits and cash were allocated (net). Unlike
+          rpt_premium_receivable.not_yet_due_amount (gross: written minus billed and due), cash
+          paid ahead of the due date lowers it.
         data_tests:
           - not_null
       - name: past_due_1_30_amount

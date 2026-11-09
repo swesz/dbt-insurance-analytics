@@ -7,7 +7,12 @@
 -- reverses; credits not refunded settle the latest-due installments of their own term first;
 -- cash settles the oldest-due first):
 --   current_amount               not past due: due on the valuation date or later. Includes
---                                not_yet_due_amount, installments scheduled after it
+--                                open_not_yet_due_amount
+--   open_not_yet_due_amount      the part of current_amount due after the valuation date: open
+--                                installments, after credits and cash were allocated. Not the
+--                                same as rpt_premium_receivable.not_yet_due_amount, which is
+--                                gross (written minus billed and due, before any allocation),
+--                                so cash paid ahead lowers this column but not that one
 --   past_due_1_30_amount ...     open installments 1-30, 31-60, 61-90, over 90 days past due
 --   unapplied_credit_amount      cash or credits beyond everything billed (negative): the
 --                                policyholder is owed money, typically a refund in transit
@@ -77,7 +82,7 @@ buckets_by_policy as (
     select
         policy_id,
         sum(case when days_past_due <= 0 then open_amount else 0 end) as current_amount,
-        sum(case when days_past_due < 0 then open_amount else 0 end) as not_yet_due_amount,
+        sum(case when days_past_due < 0 then open_amount else 0 end) as open_not_yet_due_amount,
         sum(case when days_past_due between 1 and 30 then open_amount else 0 end)
             as past_due_1_30_amount,
         sum(case when days_past_due between 31 and 60 then open_amount else 0 end)
@@ -104,7 +109,7 @@ joined as (
         coalesce(billed_by_policy.billed_amount, 0) as billed_amount,
         coalesce(collected_by_policy.collected_amount, 0) as collected_amount,
         coalesce(buckets_by_policy.current_amount, 0) as current_amount,
-        coalesce(buckets_by_policy.not_yet_due_amount, 0) as not_yet_due_amount,
+        coalesce(buckets_by_policy.open_not_yet_due_amount, 0) as open_not_yet_due_amount,
         coalesce(buckets_by_policy.past_due_1_30_amount, 0) as past_due_1_30_amount,
         coalesce(buckets_by_policy.past_due_31_60_amount, 0) as past_due_31_60_amount,
         coalesce(buckets_by_policy.past_due_61_90_amount, 0) as past_due_61_90_amount,
@@ -131,7 +136,7 @@ final as (
         cast(joined.billed_amount - joined.collected_amount as decimal(18, 2))
             as receivable_amount,
         cast(joined.current_amount as decimal(18, 2)) as current_amount,
-        cast(joined.not_yet_due_amount as decimal(18, 2)) as not_yet_due_amount,
+        cast(joined.open_not_yet_due_amount as decimal(18, 2)) as open_not_yet_due_amount,
         cast(joined.past_due_1_30_amount as decimal(18, 2)) as past_due_1_30_amount,
         cast(joined.past_due_31_60_amount as decimal(18, 2)) as past_due_31_60_amount,
         cast(joined.past_due_61_90_amount as decimal(18, 2)) as past_due_61_90_amount,
