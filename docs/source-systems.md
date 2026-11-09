@@ -185,6 +185,26 @@ Test policies and deleted claims never reach the ledger. Test policies follow a 
 
 The catastrophe events are listed in `seeds/catastrophe_events.csv` and are fictional.
 
+### 4a. Where the generated data departs from the targets
+The generator (seed 42, scale 1.0) follows the rules above with these deviations. They are
+deliberate or accepted, and the models are built for the data as generated.
+
+- **Home premium** is lower than the $1,800 target: the average annualized home term premium
+  rises from about $1,230 (terms starting in 2022) to about $1,690 (2026). The lower rate keeps
+  the home loss ratio inside its target range.
+- **Renewals are written 30 days before the new term starts**, so renewal premium is booked, and
+  sits in unearned premium, before its term begins. New business is written 0–30 days ahead.
+- **Every control total excludes test policies** (section 5), not only written premium.
+- **Orphan claims have no financial transactions**: they are reported, then closed without
+  payment.
+- **The 2025-08 claims interface timing issue moves payments only** (accounts 5000 and 5200).
+  The reserve erosion of those payments stays in 2025-08.
+- **A voided payment is reissued** as a new payment a few days later, so the claimant is still
+  paid; the void and the reissue are separate transactions.
+- **Accident-year loss ratios outside the auto target**: auto is about 87% in 2023 (bodily
+  injury claim-count noise, about 2.6 standard deviations) and about 58% in 2025 (immature at the
+  valuation date). Home excluding catastrophes is 52–65% in every accident year.
+
 ## 5. How results are checked
 
 The generator computes control totals in Python from its own records
