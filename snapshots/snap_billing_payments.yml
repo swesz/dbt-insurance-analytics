@@ -1,0 +1,55 @@
+# Snapshot of billing payments: keeps the SETTLED version of a payment the bank later returned
+# (dbt 1.9+ YAML snapshot configuration).
+#
+# RETURNED_PAYMENTS (docs/data-issues.md): when a payment bounces, the source overwrites the
+# row with payment_status = 'RETURNED' and returned_at. Accounting reconstructs the receipt
+# from received_at, so cash needs no snapshot. What the current row cannot show is what the
+# billing system said at a past close: a payment received on the 29th and returned on the 3rd
+# was SETTLED in the month-end receivable report. The snapshot keeps that version. It reads the
+# source, not staging, for the reasons in snap_policy_terms.yml.
+snapshots:
+  - name: snap_billing_payments
+    relation: source('billing', 'payments')
+    description: >
+      Versions of billing.payments (timestamp strategy on updated_at): a returned payment has a
+      SETTLED version and a RETURNED one. Amounts are integer cents, as in the source. The
+      current version has dbt_valid_to = 9999-12-31.
+    config:
+      unique_key: payment_id
+      # The source bumps updated_at when a payment is returned, the only change a payment row
+      # gets, so the timestamp strategy is exact here and dbt_valid_from is the source's own
+      # change time.
+      strategy: timestamp
+      updated_at: updated_at
+      hard_deletes: ignore
+      dbt_valid_to_current: "cast('9999-12-31 00:00:00' as timestamp)"
+    columns:
+      - name: payment_id
+        description: Payment key in the source; one row per version.
+        data_tests:
+          - not_null
+      - name: payment_status
+        description: SETTLED or RETURNED, as of this version.
+        data_tests:
+          - accepted_values:
+              arguments:
+                values: ['SETTLED', 'RETURNED']
+      - name: amount_cents
+        description: Signed amount in integer cents.
+      - name: returned_at
+        description: Null unless returned as of this version.
+      - name: updated_at
+        description: Source change time of this version; equals dbt_valid_from.
+      - name: dbt_scd_id
+        description: Version key (hash of payment_id and updated_at).
+        data_tests:
+          - unique
+          - not_null
+      - name: dbt_valid_from
+        description: Start of validity (the source updated_at).
+        data_tests:
+          - not_null
+      - name: dbt_valid_to
+        description: Exclusive end of validity; 9999-12-31 for the current version.
+        data_tests:
+          - not_null

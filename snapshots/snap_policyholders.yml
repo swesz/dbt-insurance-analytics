@@ -1,0 +1,64 @@
+# Snapshot of policyholders: their address history (dbt 1.9+ YAML snapshot configuration).
+#
+# The source keeps only the current address (docs/source-systems.md 2a). Claims and pricing
+# sometimes need the address at a past date, for example the garaging ZIP code when a loss
+# happened, so the snapshot keeps every address it saw. It reads the source, not staging, for
+# the reasons in snap_policy_terms.yml: history must be raw evidence, and staging drops the
+# soft-deleted rows whose deletion the snapshot should record.
+snapshots:
+  - name: snap_policyholders
+    relation: source('policy_admin', 'policyholders')
+    description: >
+      Versions of policy_admin.policyholders: a new version when the email, address or delete
+      flag changes (check strategy), valid from the connector's write time (_fivetran_synced).
+      The current version has dbt_valid_to = 9999-12-31. Includes test and soft-deleted
+      records, as the source has them.
+    config:
+      unique_key: policyholder_id
+      # Check strategy, not timestamp, because updated_at does not move on every change that
+      # matters. The source bumps it when the address changes, but a soft delete is set by the
+      # connector (_fivetran_deleted), not by the source application, so updated_at stays put:
+      # the SOFT_DELETED_POLICYHOLDERS rows keep their creation time as updated_at. A timestamp
+      # strategy on updated_at would never record those deletions.
+      # The check strategy compares the listed columns with the stored version instead, so any
+      # change to them is a new version, whatever updated_at says.
+      strategy: check
+      check_cols: ['email', 'address_state', 'address_zip', '_fivetran_deleted']
+      # Without updated_at, the check strategy stamps versions with the wall-clock time of the
+      # run: useless for a simulation that replays two years of closes in a few minutes, and
+      # only approximate in production. _fivetran_synced is when the connector wrote the change,
+      # the moment the warehouse learned it (at most 6 hours after the source change, 2e), and
+      # it changes with every write, so each new version gets a new dbt_scd_id. updated_at
+      # would not do: on a soft delete it is unchanged, so the delete version would get the same
+      # valid_from and the same dbt_scd_id as the version before it.
+      updated_at: _fivetran_synced
+      # Same reasoning as snap_policy_terms.yml: Fivetran keeps deleted rows, so a vanished key
+      # is a loading accident, not history.
+      hard_deletes: ignore
+      dbt_valid_to_current: "cast('9999-12-31 00:00:00' as timestamp)"
+    columns:
+      - name: policyholder_id
+        description: Policyholder key in the source; one row per version.
+        data_tests:
+          - not_null
+      - name: address_state
+        description: Mailing address state, as of this version.
+      - name: address_zip
+        description: Mailing address ZIP code, as of this version.
+      - name: _fivetran_deleted
+        description: True on a version recording a soft delete.
+      - name: _fivetran_synced
+        description: When the connector wrote this version; equals dbt_valid_from.
+      - name: dbt_scd_id
+        description: Version key (hash of policyholder_id and _fivetran_synced).
+        data_tests:
+          - unique
+          - not_null
+      - name: dbt_valid_from
+        description: Start of validity (the connector write time).
+        data_tests:
+          - not_null
+      - name: dbt_valid_to
+        description: Exclusive end of validity; 9999-12-31 for the current version.
+        data_tests:
+          - not_null

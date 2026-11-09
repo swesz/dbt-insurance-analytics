@@ -1,0 +1,95 @@
+# Snapshot of policy terms (dbt 1.9+ YAML snapshot configuration).
+#
+# Why a snapshot at all: policy_admin is replicated Fivetran-style, one row per key in its
+# latest state (docs/source-systems.md 2a). When a term is cancelled, reinstated, endorsed or
+# expires, the row is overwritten and the earlier state is gone from the source. A snapshot
+# compares the source with what it stored last time and, when a row changed, closes the old
+# version (dbt_valid_to) and inserts the new one. It can only record what it sees when it runs:
+# two changes between two runs leave one version, and history from before the first run never
+# appears. scripts/simulate_month_end_closes.py runs it at every month-end close, which is what
+# rpt_policies_in_force_as_reported_vs_restated needs.
+#
+# Why the source and not stg_policy_admin__policy_terms:
+#   - A snapshot is the only copy of the past, and it cannot be rebuilt. Whatever logic sits
+#     between the source and the snapshot at run time is baked into history for good. Staging
+#     logic changes (a new cast, a renamed column, a fixed filter); snapshotting the source
+#     keeps the history as raw evidence, and staging-style cleanup is applied downstream, where
+#     it can be changed and rerun over the whole history.
+#   - Staging drops rows (soft deletes, test policies). A row that leaves the staging view would
+#     look like a hard delete to the snapshot, and the version saying it was deleted would never
+#     be recorded. From the source, the _fivetran_deleted flag arrives as an ordinary change.
+#   - Staging is a view: snapshotting it means the snapshot depends on a model build, for no gain.
+# dbt's own guidance is the same: snapshot sources with select *, transform downstream.
+snapshots:
+  - name: snap_policy_terms
+    relation: source('policy_admin', 'policy_terms')
+    description: >
+      Versions of policy_admin.policy_terms, one row per term and state the snapshot saw
+      (timestamp strategy on updated_at). A version is valid during [dbt_valid_from,
+      dbt_valid_to); the current one has dbt_valid_to = 9999-12-31. Includes test policies and
+      soft-deleted rows, exactly as the source has them: filter downstream.
+    config:
+      unique_key: term_id
+      # Timestamp strategy: a row is a new version when its updated_at is later than the stored
+      # version's. The source bumps updated_at on every business change to a term (cancel,
+      # reinstate, endorse, expire; see loader/raw_schema.sql), so one column decides, which is
+      # cheap and exact. dbt_valid_from is then the source's own change time, not the time the
+      # snapshot ran, so "which version was current at the end of a close date" is answerable.
+      # The check strategy (compare listed columns) is for tables without a trustworthy
+      # updated_at; see snap_policyholders for a case where it is the better fit.
+      strategy: timestamp
+      updated_at: updated_at
+      # hard_deletes: what to do when a key disappears from the source. Fivetran-style tables
+      # never lose rows: a source delete arrives as _fivetran_deleted = true, which this
+      # snapshot records as a normal change. A key that vanishes means a connector problem (a
+      # re-sync, a rebuilt table) or a load at an earlier as-of than the snapshot has seen,
+      # not a business event. 'invalidate' or 'new_record' would write such an accident into
+      # history, stamped with the wall-clock time of the run; 'ignore' keeps the last version
+      # current. The anomaly is still caught: tests/actuarial/
+      # assert_snapshot_current_keys_exist_in_source.sql warns about current keys the source
+      # no longer has.
+      hard_deletes: ignore
+      # dbt_valid_to_current: the value of dbt_valid_to on current versions. dbt's default is
+      # null; a far-future date lets point-in-time joins use one condition with no null
+      # handling, "dbt_valid_from <= t and dbt_valid_to > t", and makes current rows easy to
+      # select by equality. It must be set before the first run: dbt does not rewrite rows that
+      # are already current when it changes (rerun the simulation with --fresh).
+      dbt_valid_to_current: "cast('9999-12-31 00:00:00' as timestamp)"
+    columns:
+      - name: term_id
+        description: Term key in the source; one row per version.
+        data_tests:
+          - not_null
+      - name: policy_id
+        description: The policy.
+        data_tests:
+          - not_null
+      - name: term_effective_date
+        description: First covered day, as of this version.
+      - name: term_expiration_date
+        description: Exclusive end of the term, as of this version.
+      - name: term_status
+        description: ACTIVE, EXPIRED or CANCELLED, as of this version.
+        data_tests:
+          - accepted_values:
+              arguments:
+                values: ['ACTIVE', 'EXPIRED', 'CANCELLED']
+      - name: cancellation_effective_date
+        description: Cancellation date as of this version; null if not cancelled then.
+      - name: updated_at
+        description: Source change time of this version; equals dbt_valid_from.
+      - name: _fivetran_deleted
+        description: True on a version recording a soft delete.
+      - name: dbt_scd_id
+        description: Version key (hash of term_id and updated_at).
+        data_tests:
+          - unique
+          - not_null
+      - name: dbt_valid_from
+        description: Start of the version's validity (the source updated_at).
+        data_tests:
+          - not_null
+      - name: dbt_valid_to
+        description: Exclusive end of validity; 9999-12-31 for the current version.
+        data_tests:
+          - not_null
