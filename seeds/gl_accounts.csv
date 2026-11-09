@@ -1,0 +1,13 @@
+account_number,account_name,account_type,normal_balance,statement
+1000,Cash,ASSET,DEBIT,BALANCE_SHEET
+1200,Premiums receivable,ASSET,DEBIT,BALANCE_SHEET
+2100,Unearned premium reserve,LIABILITY,CREDIT,BALANCE_SHEET
+2200,Case reserves - loss,LIABILITY,CREDIT,BALANCE_SHEET
+2300,Case reserves - loss adjustment expense,LIABILITY,CREDIT,BALANCE_SHEET
+4000,Direct premiums written,REVENUE,CREDIT,INCOME_STATEMENT
+4100,Change in unearned premium,REVENUE,DEBIT,INCOME_STATEMENT
+5000,Losses paid,EXPENSE,DEBIT,INCOME_STATEMENT
+5050,Salvage and subrogation received,EXPENSE,CREDIT,INCOME_STATEMENT
+5100,Change in case reserves - loss,EXPENSE,DEBIT,INCOME_STATEMENT
+5200,Loss adjustment expense paid,EXPENSE,DEBIT,INCOME_STATEMENT
+5300,Change in case reserves - loss adjustment expense,EXPENSE,DEBIT,INCOME_STATEMENT

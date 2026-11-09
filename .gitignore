@@ -1,0 +1,24 @@
+# Python environment (rebuilt by `uv sync`)
+.venv/
+__pycache__/
+.pytest_cache/
+
+# dbt build output. target/ and logs/ contain absolute local paths: never commit them.
+target/
+target_*/
+dbt_packages/
+logs/
+
+# DuckDB databases (rebuilt by the loader and dbt) and generated data (rebuilt by the generator)
+warehouse/*
+!warehouse/README.md
+data/generated/
+*.duckdb
+*.duckdb.wal
+
+# Local-only instructions and secrets
+CLAUDE.local.md
+.env
+
+# dbt writes an anonymous usage-tracking ID here
+.user.yml

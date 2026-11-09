@@ -1,0 +1,12 @@
+loss_cause,description,applies_to_auto,applies_to_home,is_weather
+COLLISION,Collision with a vehicle or object,true,false,false
+GLASS,Glass breakage,true,false,false
+ANIMAL_STRIKE,Collision with an animal,true,false,false
+VANDALISM,Vandalism or malicious mischief,true,true,false
+THEFT,Theft,true,true,false
+HAIL,Hail,true,true,true
+WIND,Windstorm,false,true,true
+FREEZE,Freezing and burst pipes,false,true,true
+WATER_DAMAGE,Non-weather water damage,false,true,false
+FIRE,Fire or smoke,false,true,false
+LIABILITY,Injury or damage to others on the premises,false,true,false

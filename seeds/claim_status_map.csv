@@ -1,0 +1,7 @@
+source_status,claim_status,is_open,status_description
+O,OPEN,true,Legacy code (before 2023-07-01) for an open claim
+C,CLOSED,false,Legacy code (before 2023-07-01) for a closed claim
+R,REOPENED,true,Legacy code (before 2023-07-01) for a reopened claim
+OPEN,OPEN,true,Open claim
+CLOSED,CLOSED,false,Closed claim
+REOPENED,REOPENED,true,Claim reopened after closing

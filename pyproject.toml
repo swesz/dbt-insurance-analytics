@@ -1,0 +1,34 @@
+[project]
+name = "dbt-insurance-analytics"
+version = "0.1.0"
+description = "dbt + DuckDB analytics for a fictional personal lines insurer: premium, claims, accounting."
+readme = "README.md"
+requires-python = ">=3.14,<3.15"
+dependencies = [
+    # dbt-core and its DuckDB adapter. dbt-duckdb does not pin dbt-core, so the upper bound here
+    # keeps a future dbt 2.x from arriving with a plain `uv sync --upgrade`.
+    "dbt-core>=1.12.6,<2.0",
+    "dbt-duckdb>=1.11.1",
+    # Used directly by the generator and the loader. Keep it equal to duckdb-cli below: the CLI
+    # must be able to read the database files this library writes.
+    "duckdb==2.0.0",
+    "numpy>=2.5.4",
+    "pandas>=3.1.1",
+    "pyarrow>=26.0.1",
+]
+
+[dependency-groups]
+dev = [
+    # The `duckdb` command-line tool, installed into the venv by `uv sync`.
+    "duckdb-cli==2.0.0",
+    "pytest>=9.2.0",
+]
+
+[tool.uv]
+# This repo is an application, not a library: uv installs the dependencies only, and the
+# generator runs with `python -m generator` from the repo root.
+package = false
+
+[tool.pytest.ini_options]
+testpaths = ["generator/tests"]
+pythonpath = ["."]

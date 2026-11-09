@@ -1,0 +1,4 @@
+# Normalize line endings in the repository; check out with LF everywhere.
+* text=auto eol=lf
+*.parquet binary
+*.duckdb binary

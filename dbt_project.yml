@@ -1,0 +1,80 @@
+name: insurance_analytics
+version: "1.0.0"
+profile: insurance_analytics
+require-dbt-version: [">=1.12.0", "<2.0.0"]
+
+model-paths: ["models"]
+analysis-paths: ["analyses"]
+test-paths: ["tests"]
+seed-paths: ["seeds"]
+macro-paths: ["macros"]
+snapshot-paths: ["snapshots"]
+clean-targets: ["target", "dbt_packages"]
+
+flags:
+  # No usage telemetry: the project should behave the same offline and in CI.
+  send_anonymous_usage_stats: false
+
+vars:
+  # The last day the generator simulates. Month-end tables stop at the period containing it.
+  valuation_date: "2026-09-30"
+  history_start_date: "2022-01-01"
+
+# Schemas name layers and domains, not environments: dev and prod are separate database files
+# (profiles.yml), so both use the same schema names. macros/generate_schema_name.sql makes dbt
+# use these names as they are, instead of prefixing them with the target schema.
+models:
+  insurance_analytics:
+    staging:
+      +schema: staging
+      +materialized: view
+    intermediate:
+      +schema: intermediate
+      +materialized: view
+    marts:
+      +materialized: table
+      core:
+        +schema: core
+      premium:
+        +schema: premium
+      claims:
+        +schema: claims
+      accounting:
+        +schema: accounting
+      actuarial:
+        +schema: actuarial
+
+seeds:
+  insurance_analytics:
+    +schema: reference
+    accounting_periods:
+      +column_types:
+        accounting_period: varchar
+        period_start_date: date
+        period_end_date: date
+        close_date: date
+        fiscal_year: integer
+        fiscal_quarter: integer
+    coverages:
+      +column_types:
+        annual_statement_line: varchar
+        is_liability: boolean
+    catastrophe_events:
+      +column_types:
+        start_date: date
+        end_date: date
+    gl_accounts:
+      +column_types:
+        account_number: varchar
+    gl_reconciling_items:
+      +column_types:
+        accounting_period: varchar
+        account_number: varchar
+        line_of_business: varchar
+        amount: decimal(18, 2)
+        item_type: varchar
+        explanation: varchar
+
+snapshots:
+  insurance_analytics:
+    +schema: snapshots

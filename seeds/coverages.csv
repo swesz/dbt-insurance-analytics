@@ -1,0 +1,8 @@
+coverage_code,line_of_business,coverage_name,coverage_group,annual_statement_line,annual_statement_line_name,is_liability
+BI,AUTO,Bodily injury liability,AUTO_LIABILITY,19.2,Other private passenger auto liability,true
+PD,AUTO,Property damage liability,AUTO_LIABILITY,19.2,Other private passenger auto liability,true
+COLL,AUTO,Collision,AUTO_PHYSICAL_DAMAGE,21.1,Private passenger auto physical damage,false
+COMP,AUTO,Comprehensive,AUTO_PHYSICAL_DAMAGE,21.1,Private passenger auto physical damage,false
+DWELLING,HOME,Dwelling (coverage A),HOME_PROPERTY,4,Homeowners multiple peril,false
+CONTENTS,HOME,Personal property (coverage C),HOME_PROPERTY,4,Homeowners multiple peril,false
+PERS_LIAB,HOME,Personal liability (coverage E),HOME_LIABILITY,4,Homeowners multiple peril,true

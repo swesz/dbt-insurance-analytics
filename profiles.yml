@@ -1,0 +1,29 @@
+# dbt connection profiles. dbt looks in the current directory before ~/.dbt/, so run dbt from
+# the repo root. Paths are relative to it.
+#
+# Three databases, like three warehouse projects: raw (written only by the loader), dev and prod.
+# Both targets attach raw read-only, so dbt can read the sources but never change them.
+insurance_analytics:
+  target: dev
+  outputs:
+    dev:
+      type: duckdb
+      # Override per developer: DBT_DUCKDB_DEV_PATH=warehouse/dev_<name>.duckdb gives each person
+      # (or each parallel job) its own file, the way BigQuery gives each developer a dataset.
+      path: "{{ env_var('DBT_DUCKDB_DEV_PATH', 'warehouse/dev.duckdb') }}"
+      schema: main # used only by models without a custom schema; every folder sets one
+      threads: 4
+      attach:
+        - path: "{{ env_var('DBT_DUCKDB_RAW_PATH', 'warehouse/raw.duckdb') }}"
+          alias: raw
+          read_only: true
+
+    prod:
+      type: duckdb
+      path: warehouse/prod.duckdb
+      schema: main
+      threads: 8
+      attach:
+        - path: "{{ env_var('DBT_DUCKDB_RAW_PATH', 'warehouse/raw.duckdb') }}"
+          alias: raw
+          read_only: true
