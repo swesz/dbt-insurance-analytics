@@ -21,11 +21,32 @@ to the old session, so judge their results from `git log` and by rerunning every
 
 | Agent | Owns | Finishes when |
 |---|---|---|
-| generator | `generator/`, `loader/` (not `raw_schema.sql`), exact counts in `docs/data-issues.md` | it creates `warehouse/RAW_READY` |
+| generator (done) | `generator/`, `loader/` (not `raw_schema.sql`), exact counts in `docs/data-issues.md` | done: `warehouse/RAW_READY` exists |
 | premium | `models/staging/policy_admin`, `intermediate/premium`, `marts/premium`, policy dims in `marts/core`, `tests/premium`, `docs/guide-premium.md` | validated against real data |
 | claims | `models/staging/claims`, `intermediate/claims`, `marts/claims`, claim dims, the triangle, `analyses/`, `tests/claims`, `docs/guide-claims.md` | same |
 | accounting | `models/staging/billing`, `staging/general_ledger`, `intermediate/accounting`, `marts/accounting`, `tests/accounting`, `seeds/gl_reconciling_items.csv`, `docs/guide-accounting.md` | reconciliation has no unexplained differences |
 | actuarial + snapshots | `marts/actuarial` (not the triangle), `snapshots/`, `models/exposures.yml`, `tests/actuarial`, `scripts/simulate_month_end_closes.py`, `docs/guide-snapshots-and-actuarial.md` | simulation shows real snapshot history |
+
+## Generator results (from its final report; not yet rechecked by anyone else)
+- Done: `warehouse/raw.duckdb` loaded at the default as-of, `warehouse/RAW_READY` created.
+  Generator 13 s, loader 4 s at scale 1.0. `pytest`: 18 passed. Two runs gave identical data.
+- Volume (seed 42): 24,316 policies, 68,558 terms, 290,285 transaction lines, 352,980
+  installments, 299,262 payments, 4,477 claims (8,597 CDC rows), 44,206 claim transactions,
+  1,822 GL lines. PIF at 2026-09: 8,784 auto and 6,460 home.
+- Exact planted counts are in `docs/data-issues.md` and `raw.generator_audit.planted_issues`.
+- Deviations from `docs/source-systems.md`, to document there:
+  - home premium is about $1,270–1,720 a year, not $1,800, so the home loss ratio lands in range;
+  - renewals are written 30 days before the term starts;
+  - every control total excludes test policies;
+  - orphan claims have no financial transactions;
+  - the 2025-08 timing issue moves payments only, not their reserve erosion;
+  - voided payments are reissued as a new payment.
+- Accepted: auto accident-year loss ratio of 87% in 2023 (BI claim-count noise, +2.6σ) and 58% in
+  2025 (immature), against the 60–75% target. Home excluding catastrophes is 52–65% in every year.
+- The generator's expected reconciling items are in
+  `data/generated/gl_reconciling_items_expected.csv`. Do not copy them into the seed: the
+  accounting agent documents what its reconciliation finds, and the expected file is used
+  afterwards only to check that.
 
 ## Next steps, in order
 1. Confirm every agent has finished: `warehouse/RAW_READY` exists, the commits have stopped,
