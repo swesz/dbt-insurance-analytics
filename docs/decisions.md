@@ -199,3 +199,11 @@ IDs are permanent and never reused. Status: proposed, accepted, superseded (by D
   claimant), which overstated bodily injury frequency.
 - `claimant_frequency` keeps the exposure count, because bodily injury limits apply per
   person.
+
+## D-023: CI runs on a named runner image
+- Status: accepted 2026-11-08
+- `runs-on: ubuntu-26.04`, not `ubuntu-latest`. The label moves to a new release on GitHub's
+  schedule (it moved to Ubuntu 26 from 2026-10-19), so the same commit could build on a
+  different system without any change in the repo. The first two CI runs passed on
+  `ubuntu-26.04` [V].
+- Cost: the image has to be moved by hand when GitHub retires it.

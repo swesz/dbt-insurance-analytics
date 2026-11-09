@@ -15,7 +15,10 @@ permissions:
 
 jobs:
   build:
-    runs-on: ubuntu-latest
+    # A named image, not ubuntu-latest: the label moves to a new Ubuntu release on GitHub's
+    # schedule, and a build that changes without a commit is not reproducible. The first runs
+    # passed on this image. Move it deliberately, in a commit of its own.
+    runs-on: ubuntu-26.04
     timeout-minutes: 30
     env:
       DBT_DUCKDB_DEV_PATH: warehouse/ci.duckdb
