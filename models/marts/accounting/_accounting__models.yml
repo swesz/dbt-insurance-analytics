@@ -421,8 +421,8 @@ models:
     description: >
       Premium receivable aging at the valuation date, one row per real policy with billing or
       cash: receivable (billed - collected) split into current and 1-30, 31-60, 61-90 and over
-      90 days past due, after allocating credits (latest-due first, within the term) and cash
-      (oldest-due first, across the policy) to installments; plus unapplied credit.
+      90 days past due, after allocating credits not paid out as refunds (latest-due first)
+      and cash (oldest-due first) to the policy's installments; plus unapplied credit.
     data_tests:
       # The buckets add up to the receivable.
       - dbt_utils.expression_is_true:

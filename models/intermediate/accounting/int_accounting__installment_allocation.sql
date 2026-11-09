@@ -3,21 +3,28 @@
 --
 -- The billing system records what is billed (installments, per transaction) and what is paid
 -- (payments, per policy), but never which payment settles which installment. Aging needs that
--- link, so it is constructed here, in two passes.
+-- link, so it is constructed here, in two passes over the policy's positive installments.
 --
--- Pass 1, credits, within the term, latest due first. A credit installment (a cancellation's
--- return premium, a credit endorsement) is not money: it reduces the premium the customer owes
--- for the term. A cancellation takes away the end of the coverage, so its credit takes away the
--- end of the schedule: it is applied to the term's latest-due installments first. Applied
--- oldest-first instead, the credit would "pay" the very installment a nonpayment cancellation
--- was triggered by, and the aging would show the debt as younger than it is.
+-- First, which credits are still available. A credit installment (a cancellation's return
+-- premium, a credit endorsement) is not money: it lowers what the customer owes. Billing often
+-- pays a credit out as a refund instead (a credit endorsement is refunded, a cancellation
+-- refunds what was paid beyond the premium owed). A credit that was refunded has been settled
+-- in cash and can no longer lower another installment, so refunds use up credits first:
+--     credit pool  = credits - refunds, if positive
+--     cash pool    = receipts - bank returns - (refunds beyond the credits)
+-- Without that netting, a refunded credit would count twice: once lowering the installments
+-- and once lowering the cash, and the aging would show paid installments as past due.
 --
--- Pass 2, cash, across the policy, oldest due first (first in, first out). A payment carries
--- only the policy, so the policy's net cash to date (receipts - refunds - bank returns), plus
--- any credit the term could not use, settles the remaining amounts from the oldest due date
--- onward, ties broken by installment_id. That is the usual convention for open-item aging:
--- a customer who pays is assumed to pay their oldest debt, so whatever is left open is the
--- youngest debt, and nothing looks more overdue than it is.
+-- Pass 1, the credit pool, latest due first. A cancellation takes away the end of the
+-- coverage, so its credit takes away the end of the schedule. Applied oldest-first instead, the
+-- credit would "pay" the very installment a nonpayment cancellation was triggered by, and the
+-- aging would show the debt as younger than it is.
+--
+-- Pass 2, the cash pool, oldest due first (first in, first out). A payment carries only the
+-- policy, so the policy's cash settles what credits left open, from the oldest due date
+-- onward, ties broken by installment_id. That is the usual convention for open-item aging: a
+-- customer who pays is assumed to pay their oldest debt, so nothing looks more overdue than it
+-- is. Cash or credit beyond everything billed stays unapplied (a credit balance).
 --
 -- Both passes are one window function each: with the amounts in allocation order and a
 -- running total, an installment receives what is left of the pool after the installments
@@ -71,29 +78,54 @@ scheduled as (
         and booked_transactions.booked_period <= (select accounting_period from valuation_period)
 ),
 
-term_totals as (
+credits_by_policy as (
     select
-        term_id,
         policy_id,
-        sum(case when installment_amount < 0 then -installment_amount else 0 end)
-            as credit_pool_amount,
-        sum(case when installment_amount > 0 then installment_amount else 0 end)
-            as charge_total_amount
+        -sum(installment_amount) as credit_amount
     from scheduled
-    group by 1, 2
+    where installment_amount < 0
+    group by 1
+),
+
+cash_by_policy as (
+    select
+        policy_id,
+        sum(case when cash_event_type = 'REFUND' then -cash_amount else 0 end) as refund_amount,
+        sum(case when cash_event_type <> 'REFUND' then cash_amount else 0 end)
+            as received_net_of_returns_amount
+    from cash_events
+    group by 1
+),
+
+pools as (
+    select
+        coalesce(credits_by_policy.policy_id, cash_by_policy.policy_id) as policy_id,
+        greatest(
+            coalesce(credits_by_policy.credit_amount, 0) - coalesce(cash_by_policy.refund_amount, 0),
+            0
+        ) as credit_pool_amount,
+        coalesce(cash_by_policy.received_net_of_returns_amount, 0)
+            - greatest(
+                coalesce(cash_by_policy.refund_amount, 0) - coalesce(credits_by_policy.credit_amount, 0),
+                0
+            ) as cash_pool_amount
+    from credits_by_policy
+    full outer join cash_by_policy
+        on credits_by_policy.policy_id = cash_by_policy.policy_id
 ),
 
 charges as (
     select
         scheduled.*,
-        term_totals.credit_pool_amount
+        coalesce(pools.credit_pool_amount, 0) as credit_pool_amount,
+        coalesce(pools.cash_pool_amount, 0) as cash_pool_amount
     from scheduled
-    inner join term_totals
-        on scheduled.term_id = term_totals.term_id
+    left join pools
+        on scheduled.policy_id = pools.policy_id
     where scheduled.installment_amount > 0
 ),
 
--- Pass 1: credits against the term's charges, latest due date first.
+-- Pass 1: the credit pool against the policy's charges, latest due date first.
 credit_applied as (
     select
         charges.*,
@@ -101,7 +133,7 @@ credit_applied as (
             installment_amount,
             credit_pool_amount - (
                 sum(installment_amount) over (
-                    partition by term_id
+                    partition by policy_id
                     order by due_date desc, installment_id desc
                     rows between unbounded preceding and current row
                 ) - installment_amount
@@ -110,53 +142,22 @@ credit_applied as (
     from charges
 ),
 
--- What pass 2 has to settle with cash: the policy's net cash to date, plus credits larger than
--- their term's charges (a refund owed to the customer that billing has not paid out yet).
-cash_by_policy as (
-    select
-        policy_id,
-        sum(cash_amount) as collected_amount
-    from cash_events
-    group by 1
-),
-
-excess_credit_by_policy as (
-    select
-        policy_id,
-        sum(greatest(credit_pool_amount - charge_total_amount, 0)) as excess_credit_amount
-    from term_totals
-    group by 1
-),
-
-cash_pool as (
-    select
-        coalesce(cash_by_policy.policy_id, excess_credit_by_policy.policy_id) as policy_id,
-        coalesce(cash_by_policy.collected_amount, 0)
-            + coalesce(excess_credit_by_policy.excess_credit_amount, 0) as cash_pool_amount
-    from cash_by_policy
-    full outer join excess_credit_by_policy
-        on cash_by_policy.policy_id = excess_credit_by_policy.policy_id
-),
-
--- Pass 2: cash against what credits left open, oldest due date first.
+-- Pass 2: the cash pool against what credits left open, oldest due date first.
 cash_applied as (
     select
         credit_applied.*,
         installment_amount - credit_applied_amount as remaining_after_credit_amount,
-        coalesce(cash_pool.cash_pool_amount, 0) as cash_pool_amount,
         greatest(0, least(
             installment_amount - credit_applied_amount,
-            coalesce(cash_pool.cash_pool_amount, 0) - (
+            cash_pool_amount - (
                 sum(installment_amount - credit_applied_amount) over (
-                    partition by credit_applied.policy_id
+                    partition by policy_id
                     order by due_date, installment_id
                     rows between unbounded preceding and current row
                 ) - (installment_amount - credit_applied_amount)
             )
         )) as cash_applied_amount
     from credit_applied
-    left join cash_pool
-        on credit_applied.policy_id = cash_pool.policy_id
 ),
 
 final as (

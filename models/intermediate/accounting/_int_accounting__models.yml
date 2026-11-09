@@ -179,8 +179,8 @@ models:
     description: >
       Each positive installment of a real policy's transaction booked by the valuation period,
       with the credit and cash applied to it and the amount still open at the valuation date.
-      Credits settle a term's latest-due installments first; cash settles the policy's
-      oldest-due installments first. See the model header for the reasoning.
+      Credits not paid out as refunds settle the policy's latest-due installments first; cash
+      settles its oldest-due installments first. See the model header for the reasoning.
     data_tests:
       # Nothing is over-applied: credit + cash applied never exceed the installment.
       - dbt_utils.expression_is_true:
@@ -243,6 +243,7 @@ unit_tests:
   # the 1st of 2026-03 .. 2026-08; the customer paid installments 1 and 2 (200.00) and stopped,
   # so the term was cancelled for nonpayment effective mid-June with a -250.00 credit. Valuation
   # date 2026-09-30.
+  #   No refunds, so the whole credit is available.
   #   Pass 1, credit 250 latest-due first: #6 gets 100, #5 gets 100, #4 gets 50.
   #   Pass 2, cash 200 oldest-due first: #1 gets 100, #2 gets 100.
   #   Open: #3 100.00 (due 2026-05-01, 152 days past due) and #4 50.00 (due 2026-06-01, 121).
@@ -250,7 +251,8 @@ unit_tests:
   - name: test_installment_allocation_credit_then_cash
     description: >
       A cancellation credit settles the latest installments, cash the oldest, and what is left
-      open is the installment whose nonpayment caused the cancellation.
+      open is the installment whose nonpayment caused the cancellation. A credit that was
+      refunded settles nothing.
     model: int_accounting__installment_allocation
     overrides:
       vars:
@@ -265,14 +267,28 @@ unit_tests:
           - {installment_id: 5, policy_id: 1, term_id: 10, transaction_id: 100, installment_number: 5, due_date: '2026-07-01', installment_amount: 100.00, is_test_policy: false}
           - {installment_id: 6, policy_id: 1, term_id: 10, transaction_id: 100, installment_number: 6, due_date: '2026-08-01', installment_amount: 100.00, is_test_policy: false}
           - {installment_id: 7, policy_id: 1, term_id: 10, transaction_id: 101, installment_number: 1, due_date: '2026-06-15', installment_amount: -250.00, is_test_policy: false}
+          # Policy 2: three monthly installments of 100.00, and a -50.00 credit endorsement
+          # that billing refunded in cash. The refund pays the credit out, so the credit must
+          # not also lower an installment: the two paid installments are settled and only the
+          # one due after the valuation date is open. (Without netting refunds against credits,
+          # 50.00 of installment 12 would look 60 days past due.)
+          - {installment_id: 11, policy_id: 2, term_id: 20, transaction_id: 200, installment_number: 1, due_date: '2026-07-01', installment_amount: 100.00, is_test_policy: false}
+          - {installment_id: 12, policy_id: 2, term_id: 20, transaction_id: 200, installment_number: 2, due_date: '2026-08-01', installment_amount: 100.00, is_test_policy: false}
+          - {installment_id: 13, policy_id: 2, term_id: 20, transaction_id: 200, installment_number: 3, due_date: '2026-10-01', installment_amount: 100.00, is_test_policy: false}
+          - {installment_id: 14, policy_id: 2, term_id: 20, transaction_id: 201, installment_number: 1, due_date: '2026-08-15', installment_amount: -50.00, is_test_policy: false}
       - input: ref('fct_policy_transaction_lines')
         rows:
           - {transaction_id: 100, accounting_period: '2026-03'}
           - {transaction_id: 101, accounting_period: '2026-06'}
+          - {transaction_id: 200, accounting_period: '2026-07'}
+          - {transaction_id: 201, accounting_period: '2026-08'}
       - input: ref('int_accounting__billing_cash_events')
         rows:
-          - {policy_id: 1, cash_amount: 100.00}
-          - {policy_id: 1, cash_amount: 100.00}
+          - {policy_id: 1, cash_event_type: RECEIPT, cash_amount: 100.00}
+          - {policy_id: 1, cash_event_type: RECEIPT, cash_amount: 100.00}
+          - {policy_id: 2, cash_event_type: RECEIPT, cash_amount: 100.00}
+          - {policy_id: 2, cash_event_type: RECEIPT, cash_amount: 100.00}
+          - {policy_id: 2, cash_event_type: REFUND, cash_amount: -50.00}
       - input: ref('dim_accounting_periods')
         rows:
           - {accounting_period: '2026-09', is_valuation_period: true}
@@ -284,3 +300,6 @@ unit_tests:
         - {installment_id: 4, credit_applied_amount: 50.00, cash_applied_amount: 0.00, open_amount: 50.00, days_past_due: 121}
         - {installment_id: 5, credit_applied_amount: 100.00, cash_applied_amount: 0.00, open_amount: 0.00, days_past_due: 91}
         - {installment_id: 6, credit_applied_amount: 100.00, cash_applied_amount: 0.00, open_amount: 0.00, days_past_due: 60}
+        - {installment_id: 11, credit_applied_amount: 0.00, cash_applied_amount: 100.00, open_amount: 0.00, days_past_due: 91}
+        - {installment_id: 12, credit_applied_amount: 0.00, cash_applied_amount: 100.00, open_amount: 0.00, days_past_due: 60}
+        - {installment_id: 13, credit_applied_amount: 0.00, cash_applied_amount: 0.00, open_amount: 100.00, days_past_due: -1}
