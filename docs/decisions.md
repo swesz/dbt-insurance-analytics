@@ -129,3 +129,22 @@ IDs are permanent and never reused. Status: proposed, accepted, superseded (by D
 - Refunds first use up the credits they pay out; remaining credits settle the latest-due
   installments first; cash settles the oldest-due first. The spec does not say whether a credit
   is refunded or applied to future installments [E].
+
+## D-017: In-force premium is the full-term premium at current rates
+- Status: accepted 2026-11-08
+- `fct_policy_month_end.in_force_term_premium` rebuilds each line's full-term amount as
+  written x term days / window days, because the source writes endorsements pro rata; summing
+  written premium made a rate change count for less the later in the term it happened.
+  `annualized_in_force_premium` multiplies by 12 / term months (auto x 2, home x 1), not by
+  365 / term days, so a term's day count does not move it.
+- Cost: the source rounds pro rata amounts to the cent, so a line with a window of a few days
+  can be rebuilt a few cents off. Checked: every in-force month whose term has only new
+  business or renewal lines matches written premium exactly (395,966 rows) [V].
+
+## D-018: Control totals match to the cent, with no tolerance
+- Status: accepted 2026-11-08; supersedes the $1.00 tolerance on earned and unearned premium
+- Both implementations round each line's inception-to-date earned amount the same way (D-008),
+  and every period and line matched exactly [V]. A tolerance would hide the small errors a
+  test exists for: one day of a $60 coverage is 33 cents.
+- A guard test fails when the load is the default one but no control totals match its as_of,
+  so the comparisons cannot pass by being skipped.

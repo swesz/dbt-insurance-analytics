@@ -198,8 +198,9 @@ deliberate or accepted, and the models are built for the data as generated.
 - **Every control total excludes test policies** (section 5), not only written premium.
 - **Orphan claims have no financial transactions**: they are reported, then closed without
   payment.
-- **The 2025-08 claims interface timing issue moves payments only** (accounts 5000 and 5200).
-  The reserve erosion of those payments stays in 2025-08.
+- **The 2025-08 claims interface timing issue moves payments only**: both legs of the payment
+  entries (5000 and 5200 against 1000 cash) move to 2025-09. The reserve erosion of those
+  payments (5100 and 5300) stays in 2025-08.
 - **A voided payment is reissued** as a new payment a few days later, so the claimant is still
   paid; the void and the reissue are separate transactions.
 - **Accident-year loss ratios outside the auto target**: auto is about 87% in 2023 (bodily
