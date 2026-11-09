@@ -6,7 +6,9 @@ An analytics engineering project for a fictional US personal lines insurer (priv
 auto and homeowners, 2022 to 2026). Four source systems arrive the way real loaders deliver them,
 with the defects real data has. dbt turns them into premium, claims, accounting and actuarial
 marts. Every key figure is reconciled to a general ledger and to control totals computed
-independently in Python.
+independently in Python. The insurer, its policyholders and every figure are generated: names,
+birth dates and ZIP codes are random draws, and any match with a real person or company is
+coincidence.
 
 Everything runs locally on DuckDB in a few minutes, with no account and no cost, and CI rebuilds
 it from scratch on every push.
