@@ -75,8 +75,12 @@ erosion, incurred would count it twice.
   reports *reported* incurred, which is paid plus case reserves. Ultimate loss = reported incurred
   + IBNR.
 
-`tests/claims/assert_incurred_equals_paid_plus_reserve.sql` checks the incurred identity on every
-balance row. It also computes the valuation-date figures two independent ways and compares them.
+`tests/claims/assert_claim_balances_match_dims_at_valuation.sql` compares the valuation-date
+figures computed two ways: as running month-end balances (`fct_claim_exposure_period_balances`)
+and as one direct sum (`dim_claims`, `dim_claim_exposures`). It compares paid loss, paid expense,
+loss reserve and expense reserve each on its own, so two errors that cancel out inside incurred
+cannot hide. Incurred = paid + reserve is how every model defines incurred, so the identity
+itself needs no test.
 
 ## 5. Booking: which month does a transaction belong to?
 
@@ -160,7 +164,8 @@ AY 2025       x
   adequate: rising incurred means reserves were too low.
 - **Read down a column** to compare accident years at the same maturity, a fair comparison, since
   each is the same number of months old.
-- **The diagonal** (the last cell of each row) is the book as of the latest evaluation date.
+- **The diagonal** (the last cell of each row) is the book as of the latest evaluation date. In
+  this year-end triangle that is the last year end, not the valuation date (see below).
 - **The empty lower-right** is the future. The chain-ladder method
   (`analyses/chain_ladder_development_factors.sql`) fills it in. The ratio of the sums of two
   neighboring columns (the volume-weighted age-to-age factor) says how much losses typically grow
@@ -173,10 +178,42 @@ valuation date of 2026-09-30, accident year 2026 has no 12-month cell yet, so th
 variant (`triangle_grain = 'QUARTERLY'`, accident quarters at ages 3, 6, 9, ...) is there to show
 recent quarters.
 
+### Which diagonal a reserve starts from
+
+The `ANNUAL` grain above is the standard year-end triangle, so its latest diagonal is
+2025-12-31, nine months before the valuation date. That suits comparing accident years at whole
+ages, but it is the wrong starting point for a reserve at 2026-09-30. Projecting the 2025-12-31
+figures to ultimate and subtracting today's incurred counts the development in between twice:
+AUTO accident year 2025 had $6,454,093.90 incurred at 2025-12-31 and $6,877,610.57 at
+2026-09-30, and the $423,516.67 between them would sit both in today's incurred and in the
+projection.
+
+So the triangle has a third grain, `ANNUAL_AT_VALUATION`: accident years evaluated on the
+valuation date and its anniversaries (2026-09-30, 2025-09-30, ...), which makes the ages 9, 21,
+33, 45 and 57 months. Its latest diagonal is the valuation date, the same figures as `dim_claims`
+and `rpt_loss_ratio_by_accident_year`, and
+`tests/claims/assert_triangle_latest_diagonal_matches_control_totals.sql` checks that diagonal
+against the generator's control totals. The chain-ladder analysis uses this grain, so its IBNR is
+the projected ultimate minus incurred at the valuation date.
+
+**The current accident year gets no projection.** Accident year 2026 is 9 months old: only its
+January to September accidents have happened. Its factor would be the one from 9 to 21 months,
+learned from earlier years' age-9 cells (which also held only January to September accidents)
+and their age-21 cells (which hold the whole year). For AUTO that factor is 1.4775, and the
+quarterly cells show what it is made of: 1.0285 is the January to September accidents
+developing, and 0.4490 is the October to December accidents, which had not happened at age 9.
+Applied to 2026, the factor would project accidents that have not happened yet. Those will fall
+in the unexpired months of policies still in force, which the unearned premium covers; a loss
+reserve is for accidents that already happened. So the analysis shows 2026's reported incurred
+and leaves its ultimate and IBNR empty. (Reserving estimates the current year's IBNR another
+way, for example from an expected loss ratio on the premium earned so far.)
+
 ## 9. Worked example: one claim, month by month
 
-Claim CL-2024-000123: a collision on 2024-03-02, one `COLL` exposure. Loss cost category only, to
-keep it short. The April period closes on 2024-05-06.
+Claim CL-2024-999999, a made-up claim: the generated claims are numbered from 000001 in each year,
+and 2024 has fewer than a thousand, so no real claim has this number. It is a collision on
+2024-03-02 with one `COLL` exposure. Loss cost category only, to keep it short. The April period
+closes on 2024-05-06.
 
 | # | date | source row | event(s) in `int_claims__financial_events` | booked | paid_amount | reserve_change_amount |
 |---|---|---|---|---|---|---|
@@ -216,7 +253,8 @@ What to notice:
 - The balances continue after the claim closes. A balance is a stock, so a month without activity
   still has one, and the sums over all exposures for any month need every exposure's row.
 - In the triangle, this claim contributes to accident year 2024: paid 4,700, incurred 4,700 and
-  one reported claim at age 12 (2024-12-31) and every later age.
+  one reported claim at age 12 (2024-12-31) and every later age of the `ANNUAL` grain, and from
+  age 9 (2024-09-30) in the `ANNUAL_AT_VALUATION` grain.
 
 ## 10. Data defects the claims models handle
 
@@ -233,9 +271,36 @@ What to notice:
 | `LATE_ENTERED_TRANSACTIONS` | the booking macro, through `int_claims__financial_events` |
 | test-policy claims | flagged in staging (`is_test_policy_claim`), excluded from intermediate and marts |
 
-`tests/claims/assert_claims_planted_issue_counts.sql` checks that each handled count equals what the
-generator planted. The two control-total tests compare paid, reserves, claim counts and incurred
-with the generator's independent Python figures.
+`tests/claims/assert_claims_planted_issue_counts.sql` compares the counts of six of these defects
+with what the generator planted: `DELETED_CLAIMS`, `CDC_DUPLICATE_VERSIONS`,
+`MALFORMED_POLICY_NUMBERS`, `ORPHAN_CLAIMS`, `LOSS_OUTSIDE_TERM` and `REOPENED_CLAIMS`. The others
+are checked another way: legacy status codes and inconsistent casing by relationships tests of
+the cleaned values against the seeds; voided payments and late entries by the period control
+totals, the GL reconciliation and the unit tests of the void reversal
+(`test_financial_events_void_reversed_in_void_period`) and the booking rule
+(`test_booking_rule_periods`); test-policy claims, which no claims mart includes, by the control
+totals and the GL reconciliation, which would both be off if one slipped in. The two
+control-total tests compare paid, reserves, claim counts and incurred with the generator's
+independent Python figures.
+
+### Why `is_loss_outside_term` is null for orphan claims
+
+An orphan claim has no policy in the warehouse, so there is no term to check its loss date
+against. Neither true nor false would be honest. True would merge two defects into one flag:
+the claim would count as a loss outside the term when the actual problem is the missing policy,
+and the flag would report a check that was never made. False would assert that a term covers the
+loss when nobody has seen that term. So the flag is null, SQL's "unknown", and a test on
+`dim_claims` keeps it that way: `(is_loss_outside_term is null) = (not has_matching_policy)`,
+null for every orphan and never null for a claim that has a policy.
+
+The price of a null is SQL's three-valued logic. `where not is_loss_outside_term` reads like
+"claims inside their term", but for an orphan, `not null` is null, and `where` keeps only rows
+where the condition is true. The five orphans silently drop out: the filter returns 4,430 claims,
+not 4,435. To keep everything except the claims known to be outside their term, write
+`where is_loss_outside_term is not true`. To keep only the claims known to be inside, write
+`where has_matching_policy and not is_loss_outside_term`, so that the exclusion of the orphans
+can be seen in the code. The warning-level test on the column asserts `is not true` for the same
+reason.
 
 ## 11. Model map
 

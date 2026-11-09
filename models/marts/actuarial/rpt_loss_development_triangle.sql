@@ -10,6 +10,21 @@
 -- reserves are revised. The chain-ladder method (analyses/chain_ladder_development_factors.sql)
 -- projects that growth to estimate ultimate losses, and with them IBNR.
 --
+-- Three grains (triangle_grain), which differ in their origin periods and evaluation dates:
+--   ANNUAL               accident years at year ends: ages 12, 24, 36, ... The standard
+--                        year-end triangle. Its latest diagonal is the last year end on or
+--                        before the valuation date (2025-12-31 for a 2026-09-30 valuation), so
+--                        it is up to 11 months old, and the current accident year has no cell.
+--   QUARTERLY            accident quarters at quarter ends: ages 3, 6, 9, ... Shows the recent
+--                        quarters the annual grain cannot show yet.
+--   ANNUAL_AT_VALUATION  accident years at the valuation date and its anniversaries: ages 9,
+--                        21, 33, ... for a September valuation (evaluation dates 09-30 of each
+--                        year). Its latest diagonal is the valuation date itself, the same
+--                        figures as dim_claims and rpt_loss_ratio_by_accident_year, which is
+--                        what a reserve at the valuation date has to start from. The chain
+--                        ladder uses this grain.
+-- In a December valuation the two annual grains are the same cells.
+--
 -- Evaluated on booked periods: a cell counts events booked in its evaluation period or earlier,
 -- so a cell never changes once its period is closed, the same figures the ledger showed then.
 -- Only cells whose evaluation date is on or before the valuation date exist: the rest is the
@@ -28,10 +43,30 @@ accounting_periods as (
     select * from {{ ref('accounting_periods') }}
 ),
 
+-- age_offset_months shifts the ages back from whole origin periods. For ANNUAL_AT_VALUATION it
+-- is the number of months from the valuation date's month end to the year end (3 for
+-- September), so the ages are 12 - 3 = 9, 24 - 3 = 21, ... and every evaluation date falls in
+-- the valuation month. This assumes the valuation date is a month end, as the generator's is:
+-- otherwise no evaluation date would equal it, and
+-- tests/claims/assert_triangle_latest_diagonal_matches_control_totals.sql fails.
 triangle_grains as (
-    select 'ANNUAL' as triangle_grain, 12 as months_per_origin_period
+    select
+        'ANNUAL' as triangle_grain,
+        'year' as origin_date_part,
+        12 as months_per_origin_period,
+        0 as age_offset_months
     union all
-    select 'QUARTERLY' as triangle_grain, 3 as months_per_origin_period
+    select
+        'QUARTERLY' as triangle_grain,
+        'quarter' as origin_date_part,
+        3 as months_per_origin_period,
+        0 as age_offset_months
+    union all
+    select
+        'ANNUAL_AT_VALUATION' as triangle_grain,
+        'year' as origin_date_part,
+        12 as months_per_origin_period,
+        12 - month(cast('{{ var("valuation_date") }}' as date)) as age_offset_months
 ),
 
 -- Loss events per origin period and booked period, for each grain.
@@ -39,10 +74,8 @@ loss_by_origin as (
     select
         triangle_grains.triangle_grain,
         financial_events.line_of_business,
-        date_trunc(
-            case triangle_grains.triangle_grain when 'ANNUAL' then 'year' else 'quarter' end,
-            financial_events.loss_date
-        ) as origin_start_date,
+        date_trunc(triangle_grains.origin_date_part, financial_events.loss_date)
+            as origin_start_date,
         financial_events.accounting_period,
         sum(financial_events.paid_amount) as paid_loss_amount,
         sum(financial_events.reserve_change_amount) as reserve_change_loss_amount
@@ -56,10 +89,7 @@ claims_by_origin as (
     select
         triangle_grains.triangle_grain,
         claims.line_of_business,
-        date_trunc(
-            case triangle_grains.triangle_grain when 'ANNUAL' then 'year' else 'quarter' end,
-            claims.loss_date
-        ) as origin_start_date,
+        date_trunc(triangle_grains.origin_date_part, claims.loss_date) as origin_start_date,
         claims.claim_id,
         claims.reported_at
     from claims
@@ -69,7 +99,9 @@ claims_by_origin as (
 origins as (
     select distinct
         claims_by_origin.triangle_grain,
+        triangle_grains.origin_date_part,
         triangle_grains.months_per_origin_period,
+        triangle_grains.age_offset_months,
         claims_by_origin.line_of_business,
         cast(claims_by_origin.origin_start_date as date) as origin_start_date
     from claims_by_origin
@@ -77,18 +109,24 @@ origins as (
         on claims_by_origin.triangle_grain = triangle_grains.triangle_grain
 ),
 
--- Ages are whole origin periods: 12, 24, 36, ... months (annual) or 3, 6, 9, ... (quarterly).
--- The evaluation date is the day before origin start + age, always a month end, so it is the
--- end date of an accounting period.
+-- Ages are whole origin periods less the grain's offset: 12, 24, 36, ... (annual),
+-- 3, 6, 9, ... (quarterly), 9, 21, 33, ... (annual at a September valuation). The offset is
+-- below 12, so every age is at least one month. The evaluation date is the day before
+-- origin start + age, always a month end, so it is the end date of an accounting period.
 cells as (
     select
         origins.triangle_grain,
+        origins.origin_date_part,
         origins.line_of_business,
         origins.origin_start_date,
-        origin_multiples.multiple * origins.months_per_origin_period as development_age_months,
+        origin_multiples.multiple * origins.months_per_origin_period - origins.age_offset_months
+            as development_age_months,
         cast(
             origins.origin_start_date
-                + to_months(origin_multiples.multiple * origins.months_per_origin_period)
+                + to_months(
+                    origin_multiples.multiple * origins.months_per_origin_period
+                        - origins.age_offset_months
+                )
                 - interval 1 day
             as date
         ) as evaluation_date
@@ -145,8 +183,8 @@ final as (
     select
         evaluated_cells.triangle_grain,
         evaluated_cells.line_of_business,
-        case evaluated_cells.triangle_grain
-            when 'ANNUAL' then strftime(evaluated_cells.origin_start_date, '%Y')
+        case evaluated_cells.origin_date_part
+            when 'year' then strftime(evaluated_cells.origin_start_date, '%Y')
             else strftime(evaluated_cells.origin_start_date, '%Y')
                 || '-Q' || cast(quarter(evaluated_cells.origin_start_date) as varchar)
         end as origin_period,

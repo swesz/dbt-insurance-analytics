@@ -3,27 +3,50 @@
 -- `dbt compile --select chain_ladder_development_factors` writes the SQL to target/; run it
 -- against the dev database. An analysis is not built or tested by dbt: it is a worked example.
 --
+-- Which triangle: the ANNUAL_AT_VALUATION grain, accident years evaluated at the valuation date
+-- and at its anniversaries (ages 9, 21, 33, 45 and 57 months for a 2026-09-30 valuation, all
+-- evaluated on 30 September). A reserve is stated at the valuation date, so the projection has
+-- to start from what is known on that date: the latest diagonal must be the valuation date.
+-- The year-end ANNUAL grain would not do. Its latest diagonal is 2025-12-31, so its ultimate is
+-- projected from incurred that is nine months old, and "ultimate minus today's incurred" would
+-- count the development since 2025-12-31 twice: once in today's incurred and once in the
+-- projection.
+--
 -- The chain-ladder method in four steps
 --
--- 1. Age-to-age factors. For each pair of neighboring ages (12 -> 24, 24 -> 36, ...) take the
+-- 1. Age-to-age factors. For each pair of neighboring ages (21 -> 33, 33 -> 45, ...) take the
 --    accident years that have both cells and divide the sum of their losses at the later age by
 --    the sum at the earlier age. Summing before dividing makes it *volume-weighted*: a large
 --    accident year counts more than a small one, instead of averaging each year's own ratio.
---    A factor of 1.25 from 12 to 24 means losses known at 12 months have grown by a quarter a
+--    A factor of 1.25 from 21 to 33 means losses known at 21 months have grown by a quarter a
 --    year later: late-reported claims, payments on open claims, reserve strengthening.
 -- 2. Cumulative development factors (CDF). Multiply the age-to-age factors from an age to the
---    last one: the CDF at 12 is f(12->24) x f(24->36) x ... It says how much the losses known at
+--    last one: the CDF at 21 is f(21->33) x f(33->45) x ... It says how much the losses known at
 --    that age grow until development ends. This project's history is under five years, so the
 --    product stops at the oldest age observed. Real reserving adds a *tail factor* for the
 --    development after it, which matters for slow lines like bodily injury and liability.
--- 3. Ultimate loss. For each accident year, the latest diagonal cell times the CDF at its age.
--- 4. IBNR = ultimate - reported incurred (the triangle's latest incurred). This is IBNR in the
---    broad sense: "incurred but not reported" claims that happened but have not reached us yet
---    (pure IBNR), plus the future development of claims already reported, whose case reserves
---    will turn out too low or too high (IBNER, "incurred but not enough reported").
+-- 3. Ultimate loss. For each accident year, the latest diagonal cell (incurred at the valuation
+--    date) times the CDF at its age.
+-- 4. IBNR = ultimate - reported incurred at the valuation date. This is IBNR in the broad sense:
+--    "incurred but not reported" claims that happened but have not reached us yet (pure IBNR),
+--    plus the future development of claims already reported, whose case reserves will turn out
+--    too low or too high (IBNER, "incurred but not enough reported").
 --    It can be negative: home property reserves here tend to be set high and released as claims
---    settle, so an incurred factor below 1 projects a young accident year *down*. A negative
---    estimate says the case reserves are expected to be redundant, not that claims are negative.
+--    settle, so an incurred factor below 1 projects an accident year *down*. A negative estimate
+--    says the case reserves are expected to be redundant, not that claims are negative.
+--
+-- The current accident year is not projected. At a 2026-09-30 valuation, accident year 2026 is
+-- 9 months old and only its January-September accidents have happened. Its factor would be
+-- f(9->21), learned from earlier years' age-9 cells, which also held only January-September
+-- accidents, against their age-21 cells, which hold the whole year. That factor mixes two
+-- things: the development of the accidents already in the cell, and the October-December
+-- accidents that had not happened yet. Applied to 2026 it would project accidents that have not
+-- happened. Those are covered by the unearned premium of policies still running, not by a loss
+-- reserve, which is for accidents that already happened. So the current year shows its
+-- reported incurred, and its factor, ultimate and IBNR are null. (Reserving estimates the
+-- current year's IBNR another way, for example from an expected loss ratio on the premium
+-- earned so far.) The f(9->21) row is still listed: it shows how much of a young year's growth
+-- is exposure that had not been earned yet.
 --
 -- IBNR is an estimate, not source data. No system records it; it is the actuary's projection
 -- from patterns like these, and it changes with the method, the averaging, the tail factor and
@@ -40,13 +63,14 @@ with triangle as (
         line_of_business,
         accident_year,
         development_age_months,
+        evaluation_date,
         {% if measure == 'paid' -%}
         cumulative_paid_loss_amount
         {%- else -%}
         cumulative_incurred_loss_amount
         {%- endif %} as cumulative_loss_amount
     from {{ ref('rpt_loss_development_triangle') }}
-    where triangle_grain = 'ANNUAL'
+    where triangle_grain = 'ANNUAL_AT_VALUATION'
 ),
 
 -- Pair each cell with the same accident year's cell one age (12 months) later.
@@ -90,12 +114,13 @@ cumulative_factors as (
     group by all
 ),
 
+-- The cells evaluated at the valuation date. Selected by date, not as each year's oldest age,
+-- so that a valuation date with no cell (one that is not a month end) gives no projection
+-- instead of a stale one.
 latest_diagonal as (
     select *
     from triangle
-    qualify development_age_months = max(development_age_months) over (
-        partition by line_of_business, accident_year
-    )
+    where evaluation_date = cast('{{ var("valuation_date") }}' as date)
 ),
 
 projections as (
@@ -104,17 +129,26 @@ projections as (
         latest_diagonal.accident_year,
         latest_diagonal.development_age_months as latest_age_months,
         latest_diagonal.cumulative_loss_amount as reported_amount,
-        -- The oldest age has no later factor: it is taken as developed (no tail factor).
-        coalesce(cumulative_factors.cumulative_development_factor, 1) as cumulative_development_factor,
-        round(
-            latest_diagonal.cumulative_loss_amount
-                * coalesce(cumulative_factors.cumulative_development_factor, 1),
-            2
-        ) as estimated_ultimate_amount
+        -- Younger than 12 months: the accident year is not over, so it is not projected (see
+        -- the header). Otherwise the oldest age has no later factor and is taken as developed
+        -- (no tail factor).
+        case
+            when latest_diagonal.development_age_months >= 12
+                then coalesce(cumulative_factors.cumulative_development_factor, 1)
+        end as cumulative_development_factor
     from latest_diagonal
     left join cumulative_factors
         on latest_diagonal.line_of_business = cumulative_factors.line_of_business
         and latest_diagonal.development_age_months = cumulative_factors.development_age_months
+),
+
+-- The factors are floating point, so the ultimate is rounded back to cents. A null factor
+-- (the current accident year) gives a null ultimate, and with it a null IBNR.
+estimates as (
+    select
+        *,
+        round(reported_amount * cumulative_development_factor, 2) as estimated_ultimate_amount
+    from projections
 ),
 
 final as (
@@ -143,9 +177,9 @@ final as (
         round(cumulative_development_factor, 4) as factor,
         reported_amount,
         estimated_ultimate_amount,
-        -- The factors are floating point, so the estimates are rounded back to cents.
+        -- Rounded again because the subtraction mixes a double with a decimal.
         round(estimated_ultimate_amount - reported_amount, 2) as estimated_ibnr_amount
-    from projections
+    from estimates
 )
 
 select * from final

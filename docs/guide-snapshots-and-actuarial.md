@@ -356,22 +356,34 @@ Three things to notice:
 
 ## 7. The triangle, the chain ladder and the loss ratios
 
-The accident-year loss ratio uses one number per accident year: incurred at the valuation date,
-the latest diagonal of `rpt_loss_development_triangle`. The triangle keeps the same figure at
-every earlier age too (guide-claims.md section 8), and the chain ladder
-(`analyses/chain_ladder_development_factors.sql`) turns the pattern into a projection:
+The accident-year loss ratio uses one number per accident year: incurred at the valuation date.
+In `rpt_loss_development_triangle` that number is the latest diagonal of the
+`ANNUAL_AT_VALUATION` grain, which evaluates accident years on the valuation date and its
+anniversaries: ages 9, 21, 33, 45 and 57 months, the report's `development_age_months`. It is
+not the latest diagonal of the year-end `ANNUAL` grain, which is 2025-12-31 and so up to nine
+months older (guide-claims.md section 8). The `ANNUAL_AT_VALUATION` grain holds each accident
+year at every earlier anniversary too, and the chain ladder
+(`analyses/chain_ladder_development_factors.sql`) turns that pattern into a projection:
 
 1. Age-to-age factors: for each pair of ages, the sum of incurred at the later age over the sum at
    the earlier age, across the accident years that have both.
 2. Cumulative factors: the product of the factors from an age to the last observed one.
-3. Ultimate loss = latest incurred x the cumulative factor at its age. IBNR = ultimate − incurred.
+3. Ultimate loss = incurred at the valuation date x the cumulative factor at its age.
+   IBNR = ultimate − incurred at the valuation date.
+
+The current accident year (2026, 9 months old) gets no projection. Its 9-to-21-month factor is
+mostly the October to December accidents of earlier years arriving after age 9, so applied to
+2026 it would project accidents that have not happened yet. Those belong to unearned premium,
+not to a loss reserve (guide-claims.md section 8 splits the factor).
 
 Divide the ultimate by the same earned premium and you get the **ultimate loss ratio**, the
-figure the reported accident-year loss ratio grows toward. Worked through with round numbers: an
-accident year 24 months old shows $6.0M incurred on $10.0M earned premium (60%). If the
-cumulative factor from 24 months is 1.05, the ultimate is $6.3M, IBNR $0.3M, and the ultimate
-loss ratio 63%. For a 12-month-old year with a factor of 1.15, the same 60% reported becomes 69%.
-That is why comparing the latest accident year's reported ratio with older ones flatters it.
+figure the reported accident-year loss ratio grows toward. From the analysis: AUTO accident year
+2025 is 21 months old, with $6,877,610.57 incurred on $11,810,760.75 earned (58.2%). Its
+cumulative factor from 21 months is 1.0839, so the ultimate is $7,454,558.89, IBNR $576,948.32,
+and the ultimate loss ratio 63.1%. The younger the year, the more its reported ratio
+understates, which is why comparing the latest accident years' reported ratios with older ones
+flatters them. The current year's reported ratio is the least final of all, and the chain
+ladder does not estimate how far it will move.
 
 Two cautions the analysis comments repeat: this history is under five years, so there is no tail
 factor beyond the oldest age; and catastrophe years develop differently, so actuaries often pick

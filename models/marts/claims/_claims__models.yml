@@ -34,6 +34,8 @@ models:
       - name: is_void_reversal
         data_type: boolean
         description: True on the reversal of a voided payment.
+        data_tests:
+          - not_null
       - name: transaction_type
         data_type: varchar
         description: Source transaction type.
