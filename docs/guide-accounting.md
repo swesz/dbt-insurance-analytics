@@ -137,7 +137,11 @@ The rules that make this a control and not a fudge:
 3. A difference caused by a bug is fixed, never documented.
 
 `tests/accounting/assert_reconciliation_has_no_unexplained_difference.sql` fails the build if any
-row is unexplained by more than a cent.
+row is unexplained by any amount, even a cent. There is no tolerance
+(`macros/accounting_reconciliation_tolerance.sql` is zero): both sides are sums of two-decimal
+amounts kept as DECIMAL, so a correct reconciliation is exact, and a "within a penny" allowance
+would only hide the bugs that produce penny differences, such as a cents-to-dollars conversion
+done in floating point.
 
 ## 5. How to read the reports
 

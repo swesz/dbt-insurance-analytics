@@ -5,7 +5,7 @@
 --      billing) adds up to the same receivable per line of business (built from written
 --      premium and cash). The two start from different tables, so this also checks that
 --      billing billed what was written.
--- Within a cent (macro accounting_reconciliation_tolerance).
+-- Exact to the cent: the tolerance (macro accounting_reconciliation_tolerance) is zero.
 
 with receivable as (
     select * from {{ ref('rpt_premium_receivable') }}

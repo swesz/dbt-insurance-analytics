@@ -4,7 +4,7 @@
 --      break it);
 --   2. for every closed period, the closing UPR equals the ledger's 2100 balance, apart from
 --      documented reconciling items.
--- Within a cent (macro accounting_reconciliation_tolerance).
+-- Exact to the cent: the tolerance (macro accounting_reconciliation_tolerance) is zero.
 
 with rollforward as (
     select * from {{ ref('rpt_unearned_premium_rollforward') }}

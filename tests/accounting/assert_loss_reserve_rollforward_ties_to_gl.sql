@@ -6,7 +6,7 @@
 --      figure from the claims team's model;
 --   3. for every closed period, the closing reserve equals the ledger's 2200 (LOSS) or 2300
 --      (EXPENSE) balance, apart from documented reconciling items.
--- Within a cent (macro accounting_reconciliation_tolerance).
+-- Exact to the cent: the tolerance (macro accounting_reconciliation_tolerance) is zero.
 
 with rollforward as (
     select * from {{ ref('rpt_loss_reserve_rollforward') }}
