@@ -53,6 +53,11 @@ month_end as (
 
 -- The instant each period's books close: the end of its close date (docs/source-systems.md 1),
 -- the same moment the month-end close simulation loads the sources as of.
+-- A version is "current at the close" by its dbt_valid_from, which is the source updated_at.
+-- The warehouse only sees a change at the next 6-hourly sync (2e), so a change made on the
+-- close date after 18:00 would count as known at the close here although it arrived just after
+-- midnight. The source changes nothing between 18:00 and midnight (office hours and nightly
+-- batches), so the two agree for this data.
 closes as (
     select
         accounting_period,
