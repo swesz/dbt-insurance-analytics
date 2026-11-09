@@ -231,7 +231,10 @@ models:
               arguments:
                 min_value: 1
       - name: latest_term_id
-        description: The policy's latest term (highest term_number).
+        description: >
+          The policy's latest term (highest term_number). Not necessarily the current one: a
+          renewal is written 30 days before it starts, so near a renewal the latest term has
+          not started yet and the policy is in force on the previous term.
         data_type: bigint
         data_tests:
           - not_null
@@ -370,7 +373,12 @@ models:
       - name: covered_days
         description: Days of coverage actually provided.
       - name: is_expired_at_valuation
-        description: True when the term's last covered day is on or before the valuation date.
+        description: >
+          True when the term's scheduled last day (the day before term_expiration_date) is on
+          or before the valuation date, so all of its premium is fully earned. Uses the
+          expiration date even for a cancelled term, since its cancellation line earns until
+          then. Not the same as term_status = 'EXPIRED': a cancelled term is true here once its
+          original expiration has passed.
       - name: term_written_premium
         description: The source's running total of the term's written premium.
       - name: transaction_written_premium

@@ -80,9 +80,15 @@ models:
       - name: transaction_date_period
         description: Calendar period of transaction_date.
       - name: is_booked_after_close
-        description: True when entered after its own month closed (LATE_ENTERED_TRANSACTIONS).
+        description: >
+          True when entered after its own month closed, so it is booked in a later period. Only
+          some late-entered transactions (LATE_ENTERED_TRANSACTIONS) miss the close; most are
+          entered late but still before it.
       - name: is_backdated
-        description: True when effective before it is dated (BACKDATED_ENDORSEMENTS).
+        description: >
+          True when effective before it is dated: the backdated endorsements
+          (BACKDATED_ENDORSEMENTS), but also some cancellations, and every reinstatement, which
+          takes effect on the earlier cancellation date.
       - name: term_number
         description: Term number within the policy.
       - name: term_effective_date
@@ -194,10 +200,14 @@ models:
       - dbt_utils.unique_combination_of_columns:
           arguments:
             combination_of_columns: ['policy_id', 'accounting_period']
-      # A policy is either in force with a term, or not in force without one.
+      # An in-force policy always has premium in force, and one not in force has none. Catches
+      # a sign or scaling error in rebuilding full-term premium from pro rata lines.
       - dbt_utils.expression_is_true:
           arguments:
-            expression: "is_in_force = (in_force_term_id is not null)"
+            expression: "in_force_term_premium > 0 or not is_in_force"
+      - dbt_utils.expression_is_true:
+          arguments:
+            expression: "in_force_term_premium = 0 or is_in_force"
       # Every covered policy-month has something insured, so exposure is never zero.
       - dbt_utils.expression_is_true:
           arguments:
@@ -249,12 +259,17 @@ models:
                 field: term_id
       - name: in_force_term_premium
         description: >
-          Written premium of the in-force term from transactions effective by the period end;
-          0 when not in force.
+          Full-term premium of the in-force term at the rates in force at the period end
+          (docs/source-systems.md 3b), from transactions effective by then: each line's written
+          premium scaled back to the whole term (written x term days / window days), so an
+          endorsement counts at its full-term amount whenever in the term it happened. Current
+          state, like PIF: a backdated change entered after the period end is included. 0 when
+          not in force.
       - name: annualized_in_force_premium
         description: >
-          In-force premium at an annual rate: each line's premium per day of its window, times
-          365. Mid-term changes count at their full rate, not pro rata.
+          in_force_term_premium per year of term: doubled for 6-month auto terms, unchanged for
+          12-month home terms (docs/insurance-glossary.md). Counts calendar months, not days, so
+          a term's day count does not change it.
       - name: exposure_units
         description: >
           Vehicles (AUTO) or dwellings (HOME) on the policy. The source keeps only the current

@@ -1,7 +1,9 @@
--- Earned premium per accounting period and line of business is within $1.00 of the
--- generator's control total (docs/source-systems.md 5). Not to the cent, because the two
--- implementations round per line at different points; a real error (a missed catch-up, a
--- wrong window) is far larger than a dollar. Compares only on the load the totals belong to.
+-- Earned premium per accounting period and line of business equals the generator's control
+-- total (docs/source-systems.md 5) to the cent. Both sides round each line's inception-to-date
+-- earned amount half away from zero in integer cents and then sum (D-008), so any difference,
+-- even a cent, means the two implementations disagree on a window or a booking. A tolerance
+-- would hide exactly the small errors: a one-day slip on a $60 coverage is 33 cents.
+-- Compares only on the load the totals belong to.
 
 with load_info as (
     select * from {{ source('generator_audit', 'load_info') }}
@@ -52,4 +54,4 @@ compared as (
 select *
 from compared
 where exists (select 1 from expected)
-    and abs(difference) > 1.00
+    and abs(difference) > 0

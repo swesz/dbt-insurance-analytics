@@ -51,8 +51,10 @@ final as (
             'coalesce(terms.cancellation_effective_date, terms.term_expiration_date)',
             'day'
         ) }} as covered_days,
-        -- True when the term's last covered day is on or before the valuation date, so every
-        -- line of the term is fully earned by then (the expiration date itself is not covered).
+        -- True when the term's scheduled last day (the day before the exclusive expiration
+        -- date) is on or before the valuation date, so every line of the term is fully earned
+        -- by then. A cancelled term counts by its expiration date too, not its cancellation
+        -- date: its cancellation line earns (negatively) until the original expiration.
         terms.term_expiration_date <= cast({{ dbt.dateadd('day', 1, "cast('" ~ var('valuation_date') ~ "' as date)") }} as date)
             as is_expired_at_valuation,
         -- The source's running total, and the same figure rebuilt from the transactions.

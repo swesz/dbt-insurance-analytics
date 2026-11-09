@@ -14,7 +14,6 @@ policies as (
 
 periods as (
     select * from {{ ref('dim_accounting_periods') }}
-    where not is_after_valuation
 ),
 
 lines as (
@@ -64,6 +63,8 @@ term_periods as (
     -- effective date. Without this filter, one starting mid-month would still pass the two
     -- overlap conditions above and get a row with zero covered days.
     where terms.covered_days > 0
+        -- Month-ends run through the valuation period; later periods have not happened yet.
+        and not periods.is_after_valuation
 ),
 
 policy_periods as (
@@ -80,18 +81,38 @@ policy_periods as (
     group by 1, 2, 3
 ),
 
--- Premium in force: the in-force term's premium from every transaction effective by the
--- period end (current state, like PIF). A cancellation effective later is not in it yet.
+-- Premium in force: what the in-force term would cost for its full length at the rates in
+-- force at the period end (the "in-force premium" of docs/source-systems.md 3b), from every
+-- transaction effective by then (current state, like PIF). A cancellation effective later is
+-- not in it yet.
+--
+-- The source writes an endorsement only for the days left in the term, so summing written
+-- premium would mix full-term amounts (new business, renewal) with pro rata ones, and the same
+-- rate change would count for less the later in the term it happened. Each line is therefore
+-- scaled back to the full term: written x term days / window days. New business and renewal
+-- cover the whole term and stay as they are; an endorsement of +87.03 over 132 of 182 days
+-- counts +120.00. The source rounds each pro rata amount to the cent, so the rebuilt amount
+-- can be off by up to half a cent x term days / window days: a few cents, unless the window
+-- is only a few days long. A zero-day window covers no day of the term and is left out.
 in_force_premium as (
     select
         policy_periods.policy_id,
         policy_periods.accounting_period,
-        sum(lines.written_premium) as in_force_term_premium,
-        -- Annualized: each line's premium per day of its own window, times 365. For a renewal
-        -- that is the term premium scaled to a year; for a mid-term endorsement it undoes the
-        -- pro rata, so the annualized figure reflects the new rate, not the days left.
         sum(
-            case when lines.window_days > 0 then lines.written_premium * 365.0 / lines.window_days end
+            case
+                when lines.window_days > 0
+                    then lines.written_premium * lines.term_days / lines.window_days
+            end
+        ) as in_force_term_premium,
+        -- Annualized: the full-term premium per year of term. Auto terms run 6 months and home
+        -- terms 12, so auto doubles and home stays (docs/insurance-glossary.md). Calendar
+        -- months, not days: a 184-day and a 181-day auto term at the same rate annualize alike.
+        sum(
+            case
+                when lines.window_days > 0
+                    then lines.written_premium * lines.term_days / lines.window_days
+                        * 12.0 / {{ dbt.datediff('lines.term_effective_date', 'lines.term_expiration_date', 'month') }}
+            end
         ) as annualized_in_force_premium
     from policy_periods
     inner join lines
@@ -128,7 +149,7 @@ final as (
         policy_periods.period_end_date,
         policy_periods.is_in_force,
         policy_periods.in_force_term_id,
-        cast(coalesce(in_force_premium.in_force_term_premium, 0) as decimal(18, 2))
+        cast(round(coalesce(in_force_premium.in_force_term_premium, 0), 2) as decimal(18, 2))
             as in_force_term_premium,
         cast(round(coalesce(in_force_premium.annualized_in_force_premium, 0), 2) as decimal(18, 2))
             as annualized_in_force_premium,

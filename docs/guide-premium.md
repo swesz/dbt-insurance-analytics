@@ -29,7 +29,7 @@ coverage, to the cent.
 
 ```
 raw.policy_admin.*                         (Fivetran-style: latest state, soft deletes kept)
-  -> stg_policy_admin__*                   rename, cast, drop soft deletes, flag test policies
+  -> stg_policy_admin__*                   drop soft deletes, flag test policies, day counts
   -> int_premium__transaction_lines_booked one row per coverage line: booked period + window
   -> int_premium__line_earnings_by_period  line x month: ITD earned, earned, unearned
   -> fct_premium_by_policy_period          policy x coverage x month (the subledger)
@@ -80,7 +80,8 @@ Premium is earned evenly per day over the line's **window**:
 `[effective_date, term_expiration_date)` (the end date is exclusive: coverage stops at 00:00 on
 it). A new-business line's window is the whole term; an endorsement's is the rest of the term;
 a cancellation line has negative premium and earns over `[cancellation date, expiration)`, which
-exactly offsets the original lines' earning after the cancellation.
+offsets the original lines' earning after the cancellation, to within a few cents: each line is
+rounded to the cent on its own, so a cancelled term can keep a cent or two of unearned premium.
 
 Inception-to-date (ITD) earned at the end of day d:
 
@@ -163,10 +164,15 @@ least one day. A policy is **in force** at a period end if a term covers that da
 (`term_effective_date <= d < term_expiration_date`) and is not cancelled on or before it
 (rule 3e, current state of the terms: a reinstated term counts as never cancelled).
 
-- `in_force_term_premium`: the in-force term's premium from transactions effective by the period
-  end. A cancellation effective later is not in it yet.
-- `annualized_in_force_premium`: each line's premium per day of its window, times 365, so a
-  mid-term change counts at its full rate rather than pro rata.
+- `in_force_term_premium`: what the in-force term would cost for its whole length at the rates in
+  force at the period end, from transactions effective by then. Each line is scaled back to the
+  full term (written x term days / window days), because the source writes an endorsement only
+  for the days left: in the worked example above it is 600.00 + 87.03 x 182 / 132 = **720.00**
+  from 2024-02-20 on, the same figure the cancellation is computed on. A cancellation effective
+  later is not in it yet.
+- `annualized_in_force_premium`: the same per year of term, so 6-month auto doubles (1,440.00 in
+  the example) and 12-month home stays. It counts calendar months, not days, so a 181-day and a
+  184-day auto term at the same rate annualize to the same figure.
 - `exposure_units` and `earned_exposure_years`: vehicles (auto) or dwellings (home), and
   covered days x units / 365. One car insured for a year is one car-year; claim frequency is
   claims per earned car-year.

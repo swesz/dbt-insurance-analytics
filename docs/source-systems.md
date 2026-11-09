@@ -85,8 +85,8 @@ A term covers `[term_effective_date, term_expiration_date)`: the expiration date
 - Every premium movement is a row in `policy_transactions`, split by coverage in
   `policy_transaction_lines`. `term_written_premium` on the term is just the running total.
 - `NEW_BUSINESS` and `RENEWAL` write the full term premium, effective on the term start.
-- `ENDORSEMENT` writes the premium change for the rest of the term: annual-rate change times the
-  remaining fraction of the term. Some endorsements are **backdated**: `effective_date` before
+- `ENDORSEMENT` writes the premium change for the rest of the term: the change in full-term
+  premium times the remaining fraction of the term (days left / term days). Some endorsements are **backdated**: `effective_date` before
   `transaction_date`.
 - `CANCELLATION` returns the unearned premium pro rata: minus each coverage's in-force premium
   times `(term_expiration_date - cancellation date) / term days`. A flat cancellation (effective
@@ -108,8 +108,9 @@ voids are booked by the same rule using the void timestamp as both dates.
 ### 3d. Earned and unearned premium
 Each transaction line earns evenly per day over its own coverage window
 `[effective_date, term_expiration_date)` of the term it belongs to. Cancellation lines earn
-negatively over `[cancellation date, term_expiration_date)`, which exactly offsets the
-original line's earning after the cancellation.
+negatively over `[cancellation date, term_expiration_date)`, which offsets the original lines'
+earning after the cancellation. Because each line is rounded to the cent on its own, a cancelled
+term can keep a few cents of unearned premium (positive or negative) after its cancellation date.
 
 - Inception-to-date earned of a line at date d (inclusive):
   `round(written_premium * elapsed / window_days, 2)` with
@@ -227,6 +228,6 @@ the raw tables. Neither uses the other's code. Tests in `tests/` compare them.
 | `claim_count` | accident_year | claims by year of `loss_date` |
 
 The control totals are valid only for a load at their `as_of` (the default load). Tests compare
-only when `raw.generator_audit.load_info.as_of` matches. Tolerance: written premium and paid
-amounts exactly; earned and unearned premium within $1.00 per period and line, since the two
-implementations round per line at different points.
+only when `raw.generator_audit.load_info.as_of` matches. Tolerance: none. Every figure must match
+to the cent, including earned and unearned premium: both implementations round each line's
+inception-to-date earned amount the same way, in integer cents (D-008).

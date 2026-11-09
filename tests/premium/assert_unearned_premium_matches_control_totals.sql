@@ -1,6 +1,7 @@
--- Unearned premium at each period end, per line of business, is within $1.00 of the
--- generator's control total (docs/source-systems.md 5; same rounding tolerance as earned).
--- Compares only on the load the totals belong to.
+-- Unearned premium at each period end, per line of business, equals the generator's control
+-- total (docs/source-systems.md 5) to the cent, for the same reason as earned premium: both
+-- sides round per line in integer cents the same way (D-008). Compares only on the load the
+-- totals belong to.
 
 with load_info as (
     select * from {{ source('generator_audit', 'load_info') }}
@@ -51,4 +52,4 @@ compared as (
 select *
 from compared
 where exists (select 1 from expected)
-    and abs(difference) > 1.00
+    and abs(difference) > 0
