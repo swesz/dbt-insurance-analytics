@@ -88,7 +88,8 @@ to the old session, so judge their results from `git log` and by rerunning every
 - Wording: the generator used a term from the external blocklist for home policies bought by
   auto customers. It is renamed in the current files, but earlier commits still contain it, so
   the public-safety scan fails on history until the history is rewritten or squashed before the
-  first push (owner's choice). Run the scan to see the affected blobs.
+  first push. Owner's choice (2026-11-08): rewrite only the affected files in every commit,
+  keeping commits and messages, after creating a backup branch; then rerun the scan.
 
 ## Next steps, in order
 1. Confirm every agent has finished: `warehouse/RAW_READY` exists, the commits have stopped,
