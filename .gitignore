@@ -8,6 +8,7 @@ target/
 target_*/
 dbt_packages/
 logs/
+logs_*/
 
 # DuckDB databases (rebuilt by the loader and dbt) and generated data (rebuilt by the generator)
 warehouse/*

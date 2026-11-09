@@ -163,7 +163,7 @@ in 3c. Debits and credits are both non-negative; a negative amount swaps the sid
 | CLAIMS | Dr 5100 Change in loss reserves / Cr 2200 Loss reserves; Dr 5300 / Cr 2300 for LAE reserves |
 | MANUAL | adjustments posted by accountants (see docs/data-issues.md) |
 
-Test policies and deleted claims never reach the ledger.
+Test policies and deleted claims never reach the ledger. Test policies follow a QA convention: `policy_id` 9000000 and up (so their policy numbers are `PA-9xxxxxx` or `HO-9xxxxxx`), and their policyholders' email ends in `@test.example.com`. They have terms, transactions, billing and occasionally claims, like real policies.
 
 ## 4. Volume and realism targets (scale 1.0)
 

@@ -7,7 +7,7 @@ generator records how many rows each issue affects in `raw.generator_audit.plant
 
 | Code | Where | What is wrong | Handled in | Caught by |
 |---|---|---|---|---|
-| `TEST_POLICIES` | policy_admin.policyholders, policies (+ their terms, transactions, claims) | about 25 QA test policies in production data: policyholder email ends in `@test.example.com` | staging excludes them | GL reconciliation (the ledger never had them); planted-count test |
+| `TEST_POLICIES` | policy_admin.policyholders, policies (+ their terms, transactions, claims) | about 25 QA test policies in production data. QA convention: their `policy_id` is 9000000 or higher (policy numbers `PA-9xxxxxx`, `HO-9xxxxxx`), and their policyholders' email ends in `@test.example.com` | staging flags them (`is_test_policy`, `is_test_record`) without joins; intermediate models and marts exclude them | GL reconciliation (the ledger never had them); planted-count test |
 | `SOFT_DELETED_POLICYHOLDERS` | policy_admin.policyholders | duplicate customer records removed in the source, `_fivetran_deleted = true`, about 40 | staging filters `_fivetran_deleted` | not_null/relationships on policies → policyholders |
 | `SOFT_DELETED_POLICIES` | policy_admin.policies | policies created in error and deleted, no transactions, about 30 | staging filters | planted-count test |
 | `CDC_DUPLICATE_VERSIONS` | claims.* | a rerun loaded about 0.5% of versions twice: same key and `updated_at`, different `_rivery_run_id` | staging keeps one row per key (latest version, deterministic tiebreak) | unique test on the staging key |
