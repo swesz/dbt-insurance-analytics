@@ -1,0 +1,381 @@
+version: 2
+
+# Actuarial reports built on the premium and claims marts and on the policy-term snapshot.
+# rpt_loss_development_triangle has its own file (_actuarial__claims_models.yml).
+
+models:
+  - name: rpt_loss_ratio_by_period
+    description: >
+      Calendar-period loss ratio per accounting period and line of business, on booked periods
+      through the valuation period: earned premium, net paid loss, change in the case loss
+      reserve, calendar-period incurred loss (split into catastrophe and non-catastrophe by the
+      claim's catastrophe flag), loss ratio, and LAE paid, incurred and ratios.
+    data_tests:
+      - dbt_utils.unique_combination_of_columns:
+          arguments:
+            combination_of_columns: ['accounting_period', 'line_of_business']
+      - dbt_utils.expression_is_true:
+          arguments:
+            expression: "incurred_loss_amount = net_paid_loss_amount + change_in_case_loss_reserve_amount"
+      - dbt_utils.expression_is_true:
+          arguments:
+            expression: "incurred_loss_amount = catastrophe_incurred_loss_amount + non_catastrophe_incurred_loss_amount"
+      - dbt_utils.expression_is_true:
+          arguments:
+            expression: "incurred_lae_amount = paid_lae_amount + change_in_case_lae_reserve_amount"
+    columns:
+      - name: accounting_period
+        description: Accounting period ('YYYY-MM').
+        data_tests:
+          - not_null
+          - relationships:
+              arguments:
+                to: ref('dim_accounting_periods')
+                field: accounting_period
+      - name: line_of_business
+        description: AUTO or HOME.
+        data_tests:
+          - not_null
+          - accepted_values:
+              arguments:
+                values: ['AUTO', 'HOME']
+      - name: period_end_date
+        description: Last day of the period.
+        data_tests:
+          - not_null
+      - name: fiscal_year
+        description: Fiscal year of the period.
+      - name: fiscal_quarter
+        description: Fiscal quarter of the period.
+      - name: earned_premium
+        description: Premium earned in the period (fct_premium_by_policy_period).
+        data_tests:
+          - not_null
+      - name: net_paid_loss_amount
+        description: Loss payments minus recoveries booked in the period, voids reversed at the void.
+        data_tests:
+          - not_null
+      - name: change_in_case_loss_reserve_amount
+        description: Change in the outstanding case loss reserve booked in the period.
+        data_tests:
+          - not_null
+      - name: incurred_loss_amount
+        description: Calendar-period incurred loss = net paid + change in case reserve.
+        data_tests:
+          - not_null
+      - name: catastrophe_incurred_loss_amount
+        description: Part of incurred loss on claims tied to a catastrophe event.
+        data_tests:
+          - not_null
+      - name: non_catastrophe_incurred_loss_amount
+        description: Incurred loss on all other claims.
+        data_tests:
+          - not_null
+      - name: loss_ratio
+        description: incurred_loss_amount / earned_premium; null without earned premium.
+      - name: non_catastrophe_loss_ratio
+        description: non_catastrophe_incurred_loss_amount / earned_premium.
+      - name: catastrophe_loss_ratio
+        description: catastrophe_incurred_loss_amount / earned_premium.
+      - name: paid_lae_amount
+        description: Loss adjustment expense (DCC + AO) paid in the period.
+        data_tests:
+          - not_null
+      - name: change_in_case_lae_reserve_amount
+        description: Change in the expense case reserve booked in the period.
+        data_tests:
+          - not_null
+      - name: incurred_lae_amount
+        description: paid_lae_amount + change_in_case_lae_reserve_amount.
+        data_tests:
+          - not_null
+      - name: lae_ratio
+        description: incurred_lae_amount / earned_premium.
+      - name: paid_lae_ratio
+        description: paid_lae_amount / earned_premium.
+      - name: loss_and_lae_ratio
+        description: (incurred loss + incurred LAE) / earned premium.
+
+  - name: rpt_loss_ratio_by_accident_year
+    description: >
+      Accident-year loss ratio per accident year and line of business at the valuation date:
+      the calendar year's earned premium against incurred and paid loss of the year's accidents,
+      claim counts, and the same excluding catastrophes. Recent years are immature; see
+      development_age_months.
+    data_tests:
+      - dbt_utils.unique_combination_of_columns:
+          arguments:
+            combination_of_columns: ['accident_year', 'line_of_business']
+      - dbt_utils.expression_is_true:
+          arguments:
+            expression: "incurred_loss_amount = net_paid_loss_amount + case_reserve_loss_amount"
+      - dbt_utils.expression_is_true:
+          arguments:
+            expression: "incurred_loss_amount = catastrophe_incurred_loss_amount + non_catastrophe_incurred_loss_amount"
+      - dbt_utils.expression_is_true:
+          arguments:
+            expression: "non_catastrophe_claim_count <= claim_count"
+    columns:
+      - name: accident_year
+        description: Year of the loss date; for premium, the calendar year earned.
+        data_tests:
+          - not_null
+      - name: line_of_business
+        description: AUTO or HOME.
+        data_tests:
+          - not_null
+          - accepted_values:
+              arguments:
+                values: ['AUTO', 'HOME']
+      - name: valuation_date
+        description: The date losses are valued at (var valuation_date).
+      - name: development_age_months
+        description: Months from the start of the accident year to the valuation date.
+        data_tests:
+          - not_null
+      - name: earned_months
+        description: Accounting periods of the calendar year with earned premium (12, fewer for the valuation year).
+      - name: earned_premium
+        description: Premium earned in the calendar year (sum of its periods).
+        data_tests:
+          - not_null
+      - name: claim_count
+        description: Claims with a loss date in the year (deleted and test-policy claims excluded).
+        data_tests:
+          - not_null
+      - name: non_catastrophe_claim_count
+        description: claim_count without catastrophe claims.
+      - name: net_paid_loss_amount
+        description: Net paid loss on the year's claims at the valuation date.
+        data_tests:
+          - not_null
+      - name: case_reserve_loss_amount
+        description: Outstanding case loss reserve on the year's claims at the valuation date.
+        data_tests:
+          - not_null
+      - name: incurred_loss_amount
+        description: net_paid_loss_amount + case_reserve_loss_amount (reported incurred, no IBNR).
+        data_tests:
+          - not_null
+      - name: catastrophe_incurred_loss_amount
+        description: Incurred loss on catastrophe claims.
+      - name: non_catastrophe_incurred_loss_amount
+        description: Incurred loss on all other claims.
+      - name: incurred_loss_ratio
+        description: incurred_loss_amount / earned_premium.
+      - name: paid_loss_ratio
+        description: net_paid_loss_amount / earned_premium.
+      - name: non_catastrophe_incurred_loss_ratio
+        description: non_catastrophe_incurred_loss_amount / earned_premium.
+
+  - name: rpt_frequency_severity
+    description: >
+      Claim frequency, average incurred severity and pure premium per accident year, line of
+      business and coverage, with catastrophe claims excluded (is_catastrophe_included = false)
+      and included (true). Earned exposure is attributed to a coverage when the policy earned
+      premium on it in the month; claims are claim exposures on matched policies with a loss
+      inside a term.
+    data_tests:
+      - dbt_utils.unique_combination_of_columns:
+          arguments:
+            combination_of_columns: ['accident_year', 'line_of_business', 'coverage_code', 'is_catastrophe_included']
+      - dbt_utils.expression_is_true:
+          arguments:
+            expression: "claim_count <= claim_exposure_count"
+    columns:
+      - name: accident_year
+        description: Year of the loss date; for exposure and premium, the calendar year earned.
+        data_tests:
+          - not_null
+      - name: line_of_business
+        description: AUTO or HOME.
+        data_tests:
+          - not_null
+          - accepted_values:
+              arguments:
+                values: ['AUTO', 'HOME']
+      - name: coverage_code
+        description: Coverage.
+        data_tests:
+          - not_null
+          - relationships:
+              arguments:
+                to: ref('dim_coverages')
+                field: coverage_code
+      - name: coverage_group
+        description: AUTO_LIABILITY, AUTO_PHYSICAL_DAMAGE, HOME_PROPERTY or HOME_LIABILITY.
+      - name: is_catastrophe_included
+        description: False for the row without catastrophe claims, true for the row with all claims.
+        data_tests:
+          - not_null
+      - name: earned_exposure_years
+        description: Earned exposure attributed to the coverage (car-years or house-years).
+        data_tests:
+          - not_null
+          - dbt_utils.accepted_range:
+              arguments:
+                min_value: 0
+      - name: claim_exposure_count
+        description: Claim exposures on the coverage (one per claim and claimant); the frequency numerator.
+        data_tests:
+          - not_null
+      - name: claim_count
+        description: Distinct claims with an exposure on the coverage.
+        data_tests:
+          - not_null
+      - name: incurred_loss_amount
+        description: Incurred loss of those exposures at the valuation date.
+        data_tests:
+          - not_null
+      - name: claim_frequency
+        description: claim_exposure_count / earned_exposure_years.
+      - name: average_incurred_severity
+        description: incurred_loss_amount / claim_exposure_count.
+      - name: pure_premium
+        description: incurred_loss_amount / earned_exposure_years = frequency x severity.
+      - name: earned_premium
+        description: Premium earned on the coverage in the calendar year.
+      - name: earned_premium_per_exposure_year
+        description: earned_premium / earned_exposure_years; pure_premium over it is the coverage's loss ratio.
+
+  - name: fct_policy_in_force_at_close
+    description: >
+      One row per real policy and accounting period in which the policy was in force at the
+      period end as reported at the close (the snap_policy_terms version current at the end
+      of close_date, rule 3e) or as restated today (fct_policy_month_end), with the reason when
+      the two differ. Only periods whose close the snapshot recorded.
+    data_tests:
+      - dbt_utils.unique_combination_of_columns:
+          arguments:
+            combination_of_columns: ['policy_id', 'accounting_period']
+      - dbt_utils.expression_is_true:
+          arguments:
+            expression: "is_in_force_as_reported or is_in_force_restated"
+      # A reason exactly when the two statuses differ.
+      - dbt_utils.expression_is_true:
+          arguments:
+            expression: "(restatement_reason is null) = (is_in_force_as_reported = is_in_force_restated)"
+    columns:
+      - name: policy_period_key
+        description: Surrogate key of policy_id and accounting_period.
+        data_tests:
+          - unique
+          - not_null
+      - name: policy_id
+        description: The policy.
+        data_tests:
+          - not_null
+          - relationships:
+              arguments:
+                to: ref('dim_policies')
+                field: policy_id
+      - name: accounting_period
+        description: Accounting period.
+        data_tests:
+          - not_null
+      - name: line_of_business
+        description: AUTO or HOME.
+        data_tests:
+          - not_null
+      - name: period_end_date
+        description: The date in-force status is measured at.
+      - name: close_date
+        description: The period's close date; the as-reported state is the one at its end.
+      - name: is_in_force_as_reported
+        description: In force at the period end on the term versions current at the close.
+        data_tests:
+          - not_null
+      - name: is_in_force_restated
+        description: In force at the period end on today's state (fct_policy_month_end.is_in_force).
+        data_tests:
+          - not_null
+      - name: as_reported_term_id
+        description: The term in force as reported; null if not in force then.
+      - name: restated_term_id
+        description: The term in force as restated; null if not in force today.
+      - name: restatement_reason
+        description: Why the statuses differ; null when they agree.
+        data_tests:
+          - accepted_values:
+              arguments:
+                values: ['TERM_ENTERED_AFTER_CLOSE', 'REINSTATED_AFTER_CLOSE', 'CANCELLED_AFTER_CLOSE', 'TERM_REMOVED_AFTER_CLOSE', 'OTHER']
+
+  - name: rpt_policies_in_force_as_reported_vs_restated
+    description: >
+      Policies in force per accounting period and line of business as reported at the period's
+      close (from snap_policy_terms) and as restated today (fct_policy_month_end), the
+      difference, its breakdown by reason and the main driver. As-reported figures are null for
+      periods the snapshot history does not cover.
+    data_tests:
+      - dbt_utils.unique_combination_of_columns:
+          arguments:
+            combination_of_columns: ['accounting_period', 'line_of_business']
+      # The difference is fully explained by the policies added and dropped since the close,
+      # and every added or dropped policy has exactly one reason.
+      - dbt_utils.expression_is_true:
+          arguments:
+            expression: "policies_in_force_difference = policies_added_after_close - policies_dropped_after_close"
+          config:
+            where: "has_as_reported"
+      - dbt_utils.expression_is_true:
+          arguments:
+            expression: >-
+              policies_added_after_close + policies_dropped_after_close
+              = term_entered_after_close_count + reinstated_after_close_count
+              + cancelled_after_close_count + term_removed_after_close_count
+              + other_restatement_count
+      - dbt_utils.expression_is_true:
+          arguments:
+            expression: "has_as_reported = (policies_in_force_as_reported is not null)"
+    columns:
+      - name: accounting_period
+        description: Accounting period.
+        data_tests:
+          - not_null
+          - relationships:
+              arguments:
+                to: ref('dim_accounting_periods')
+                field: accounting_period
+      - name: line_of_business
+        description: AUTO or HOME.
+        data_tests:
+          - not_null
+          - accepted_values:
+              arguments:
+                values: ['AUTO', 'HOME']
+      - name: period_end_date
+        description: The date PIF is measured at.
+      - name: close_date
+        description: The period's close date; as reported means as known at its end.
+      - name: has_as_reported
+        description: True when the snapshot history covers the period's close.
+        data_tests:
+          - not_null
+      - name: policies_in_force_as_reported
+        description: PIF at the period end on the term versions current at the close; null if not covered.
+      - name: policies_in_force_restated
+        description: PIF at the period end on today's state of the terms (rule 3e).
+        data_tests:
+          - not_null
+      - name: policies_in_force_difference
+        description: Restated minus as reported.
+      - name: policies_added_after_close
+        description: Policies in force today for the period end that were not at the close.
+      - name: policies_dropped_after_close
+        description: Policies in force at the close that are not today.
+      - name: term_entered_after_close_count
+        description: Added because the in-force term was entered after the close (late new business).
+      - name: reinstated_after_close_count
+        description: Added because a cancellation was reversed after the close.
+      - name: cancelled_after_close_count
+        description: Dropped because a cancellation effective by the period end was entered after the close.
+      - name: term_removed_after_close_count
+        description: Dropped because the term no longer exists in the policy system.
+      - name: other_restatement_count
+        description: Added or dropped for any other change to the term's dates.
+      - name: main_restatement_driver
+        description: The reason with the most added or dropped policies; null when none.
+        data_tests:
+          - accepted_values:
+              arguments:
+                values: ['TERM_ENTERED_AFTER_CLOSE', 'REINSTATED_AFTER_CLOSE', 'CANCELLED_AFTER_CLOSE', 'TERM_REMOVED_AFTER_CLOSE', 'OTHER']
