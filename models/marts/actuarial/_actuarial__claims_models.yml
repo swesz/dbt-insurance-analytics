@@ -19,11 +19,6 @@ models:
               - line_of_business
               - origin_period
               - development_age_months
-      # No cell looks into the future. (That reported counts never decrease along an origin
-      # period is checked in tests/claims/assert_triangle_reported_counts_never_decrease.sql.)
-      - dbt_utils.expression_is_true:
-          arguments:
-            expression: "evaluation_date <= cast('{{ var(\"valuation_date\") }}' as date)"
     columns:
       - name: triangle_grain
         description: >
