@@ -12,6 +12,12 @@ models:
       - dbt_utils.expression_is_true:
           arguments:
             expression: "not coalesce(is_loss_outside_term, false) or (net_paid_loss_amount = 0 and not is_open)"
+      # is_loss_outside_term is unknown (null) exactly when there is no policy to check the loss
+      # date against: null for every orphan claim, and never null for a claim with a policy.
+      # Coalescing orphans to true or false would break this (docs/guide-claims.md section 10).
+      - dbt_utils.expression_is_true:
+          arguments:
+            expression: "(is_loss_outside_term is null) = (not has_matching_policy)"
     columns:
       - name: claim_id
         description: Primary key.
@@ -145,7 +151,9 @@ models:
       - name: is_loss_outside_term
         description: >
           True when no in-force, uncancelled term of the matched policy covers loss_date
-          (LOSS_OUTSIDE_TERM). Null for orphan claims, which have no terms to check.
+          (LOSS_OUTSIDE_TERM). Null for orphan claims, which have no terms to check. Filter
+          with `is_loss_outside_term is not true`: `not is_loss_outside_term` drops the
+          orphans too, because not null is null.
         data_tests:
           # LOSS_OUTSIDE_TERM (docs/data-issues.md): about 0.3% of claims have a loss date before
           # the term started or after it was cancelled. The source closed them without payment,

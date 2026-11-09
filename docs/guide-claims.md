@@ -272,6 +272,25 @@ What to notice:
 generator planted. The two control-total tests compare paid, reserves, claim counts and incurred
 with the generator's independent Python figures.
 
+### Why `is_loss_outside_term` is null for orphan claims
+
+An orphan claim has no policy in the warehouse, so there is no term to check its loss date
+against. Neither true nor false would be honest. True would merge two defects into one flag:
+the claim would count as a loss outside the term when the actual problem is the missing policy,
+and the flag would report a check that was never made. False would assert that a term covers the
+loss when nobody has seen that term. So the flag is null, SQL's "unknown", and a test on
+`dim_claims` keeps it that way: `(is_loss_outside_term is null) = (not has_matching_policy)`,
+null for every orphan and never null for a claim that has a policy.
+
+The price of a null is SQL's three-valued logic. `where not is_loss_outside_term` reads like
+"claims inside their term", but for an orphan, `not null` is null, and `where` keeps only rows
+where the condition is true. The five orphans silently drop out: the filter returns 4,430 claims,
+not 4,435. To keep everything except the claims known to be outside their term, write
+`where is_loss_outside_term is not true`. To keep only the claims known to be inside, write
+`where has_matching_policy and not is_loss_outside_term`, so that the exclusion of the orphans
+can be seen in the code. The warning-level test on the column asserts `is not true` for the same
+reason.
+
 ## 11. Model map
 
 | Layer | Model | Grain |
