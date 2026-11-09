@@ -65,3 +65,18 @@ IDs are permanent and never reused. Status: proposed, accepted, superseded (by D
 ## D-007: Newest versions: Python 3.14, dbt-core 1.12.6, dbt-duckdb 1.11.1, DuckDB 2.0.0
 - Status: accepted 2026-11-08
 - Python 3.15 exists, but dbt-core 1.12.6 lists support up to 3.14 [V, PyPI classifiers].
+
+## D-008: Earned premium is computed in exact integer cents
+- Status: accepted 2026-11-08
+- `macros/premium_earned_to_date.sql` computes round(premium * elapsed / days) as integer
+  arithmetic on cents, rounding half away from zero, instead of DECIMAL division.
+- Reason: DuckDB evaluates DECIMAL / INTEGER as a DOUBLE, and a DOUBLE can round a half cent the
+  wrong way: `round(1.005::double, 2)` is 1.0 [V]. The macro matched Python's Decimal on 200,000
+  random cases including 357 exact half-cent ties [V, premium build]. The same DOUBLE behavior
+  broke `cents_to_dollars` until it switched to multiplying by 0.01.
+- Cost: `//` is DuckDB's integer division; another warehouse needs its own operator.
+
+## D-009: Exposure units are the policy's current vehicle or dwelling count
+- Status: accepted 2026-11-08
+- The source keeps no add or remove dates for vehicles, so every month of a policy uses today's
+  count. Revisit if the raw contract gains unit history.

@@ -22,7 +22,7 @@ to the old session, so judge their results from `git log` and by rerunning every
 | Agent | Owns | Finishes when |
 |---|---|---|
 | generator (done) | `generator/`, `loader/` (not `raw_schema.sql`), exact counts in `docs/data-issues.md` | done: `warehouse/RAW_READY` exists |
-| premium | `models/staging/policy_admin`, `intermediate/premium`, `marts/premium`, policy dims in `marts/core`, `tests/premium`, `docs/guide-premium.md` | validated against real data |
+| premium (done) | `models/staging/policy_admin`, `intermediate/premium`, `marts/premium`, policy dims in `marts/core`, `tests/premium`, `docs/guide-premium.md` | validated against real data |
 | claims | `models/staging/claims`, `intermediate/claims`, `marts/claims`, claim dims, the triangle, `analyses/`, `tests/claims`, `docs/guide-claims.md` | same |
 | accounting | `models/staging/billing`, `staging/general_ledger`, `intermediate/accounting`, `marts/accounting`, `tests/accounting`, `seeds/gl_reconciling_items.csv`, `docs/guide-accounting.md` | reconciliation has no unexplained differences |
 | actuarial + snapshots | `marts/actuarial` (not the triangle), `snapshots/`, `models/exposures.yml`, `tests/actuarial`, `scripts/simulate_month_end_closes.py`, `docs/guide-snapshots-and-actuarial.md` | simulation shows real snapshot history |
@@ -47,6 +47,16 @@ to the old session, so judge their results from `git log` and by rerunning every
   `data/generated/gl_reconciling_items_expected.csv`. Do not copy them into the seed: the
   accounting agent documents what its reconciliation finds, and the expected file is used
   afterwards only to check that.
+
+## Premium results (from its final report)
+- Its slice builds 218 nodes, all passing. Written, earned, unearned and PIF control totals
+  match the generator to the cent in all 114 period × LOB rows, and an independent Python
+  re-implementation agrees with both for the periods it checked.
+- Fixed during validation: month-end rows with 0 covered days on flat-cancelled terms, and
+  0 exposure units for policies keyed in late.
+- Own definitions, to review: `in_force_term_premium` and `annualized_in_force_premium`.
+- Run its slice with `--indirect-selection=cautious`, so tests from other domains don't run in a
+  partial dev file.
 
 ## Next steps, in order
 1. Confirm every agent has finished: `warehouse/RAW_READY` exists, the commits have stopped,
