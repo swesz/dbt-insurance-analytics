@@ -1,0 +1,167 @@
+version: 2
+
+models:
+  - name: fct_claim_transactions
+    description: >
+      One row per claim financial event (payment, recovery, reserve change, payment void),
+      booked in its accounting period; test-policy claims excluded. Incremental
+      (delete+insert on financial_event_id, with a lookback on the loader timestamp); the
+      strategy is explained at the top of the model. Sum paid_amount for net paid and
+      reserve_change_amount for the change in case reserves.
+    columns:
+      - name: financial_event_id
+        description: "Primary key: claim_transaction_id and event_type, e.g. '1234-PAYMENT_VOID'."
+        data_tests:
+          - unique
+          - not_null
+      - name: claim_transaction_id
+        description: Source transaction.
+        data_tests:
+          - not_null
+      - name: event_type
+        description: PAYMENT, RECOVERY, RESERVE_CHANGE or PAYMENT_VOID.
+        data_tests:
+          - not_null
+          - accepted_values:
+              arguments:
+                values: ['PAYMENT', 'RECOVERY', 'RESERVE_CHANGE', 'PAYMENT_VOID']
+      - name: is_void_reversal
+        description: True on the reversal of a voided payment.
+      - name: transaction_type
+        description: Source transaction type.
+      - name: claim_id
+        description: The claim.
+        data_tests:
+          - not_null
+          - relationships:
+              arguments:
+                to: ref('dim_claims')
+                field: claim_id
+      - name: exposure_id
+        description: The exposure.
+        data_tests:
+          - not_null
+          - relationships:
+              arguments:
+                to: ref('dim_claim_exposures')
+                field: exposure_id
+      - name: coverage_code
+        description: Coverage of the exposure.
+        data_tests:
+          - relationships:
+              arguments:
+                to: ref('coverages')
+                field: coverage_code
+      - name: line_of_business
+        description: AUTO or HOME.
+        data_tests:
+          - not_null
+      - name: cost_category
+        description: LOSS or EXPENSE.
+        data_tests:
+          - not_null
+      - name: expense_type
+        description: DCC or AO for EXPENSE.
+      - name: reserve_reason
+        description: Why a reserve changed.
+      - name: transaction_date
+        description: Source transaction date.
+      - name: event_date
+        description: Date the event is dated by (the void date for a reversal).
+      - name: entered_at
+        description: When the event was entered (the void timestamp for a reversal).
+      - name: accounting_period
+        description: Booked period, 'YYYY-MM'.
+        data_tests:
+          - not_null
+      - name: paid_amount
+        description: Signed contribution to net paid.
+        data_tests:
+          - not_null
+      - name: reserve_change_amount
+        description: Signed change to the case reserve.
+        data_tests:
+          - not_null
+      - name: loss_date
+        description: Date of the loss.
+      - name: accident_year
+        description: Year of loss_date.
+      - name: source_loaded_at
+        description: Latest loader write among the source rows; the incremental high-water mark.
+        data_tests:
+          - not_null
+
+  - name: fct_claim_exposure_period_balances
+    description: >
+      Month-end balances per exposure x cost category x accounting period through the valuation
+      period: paid and reserve change in the period, ITD net paid, outstanding case reserve and
+      incurred. Test-policy claims excluded.
+    data_tests:
+      - dbt_utils.unique_combination_of_columns:
+          arguments:
+            combination_of_columns: ['exposure_id', 'cost_category', 'accounting_period']
+    columns:
+      - name: exposure_id
+        description: The exposure.
+        data_tests:
+          - not_null
+          - relationships:
+              arguments:
+                to: ref('dim_claim_exposures')
+                field: exposure_id
+      - name: cost_category
+        description: LOSS or EXPENSE.
+        data_tests:
+          - not_null
+          - accepted_values:
+              arguments:
+                values: ['LOSS', 'EXPENSE']
+      - name: accounting_period
+        description: Period the balances are at the end of.
+        data_tests:
+          - not_null
+          - relationships:
+              arguments:
+                to: ref('accounting_periods')
+                field: accounting_period
+      - name: period_end_date
+        description: Last day of the period.
+        data_tests:
+          - not_null
+      - name: claim_id
+        description: The claim.
+        data_tests:
+          - not_null
+      - name: coverage_code
+        description: Coverage of the exposure.
+      - name: line_of_business
+        description: AUTO or HOME.
+        data_tests:
+          - not_null
+          - accepted_values:
+              arguments:
+                values: ['AUTO', 'HOME']
+      - name: loss_date
+        description: Date of the loss.
+      - name: accident_year
+        description: Year of loss_date.
+      - name: period_paid_amount
+        description: Net paid booked in the period.
+        data_tests:
+          - not_null
+      - name: period_reserve_change_amount
+        description: Case reserve change booked in the period.
+        data_tests:
+          - not_null
+      - name: itd_paid_amount
+        description: Net paid booked in or before the period.
+        data_tests:
+          - not_null
+      - name: case_reserve_amount
+        description: Outstanding case reserve at period end.
+        data_tests:
+          - not_null
+      - name: incurred_amount
+        description: itd_paid_amount + case_reserve_amount.
+        data_tests:
+          - not_null

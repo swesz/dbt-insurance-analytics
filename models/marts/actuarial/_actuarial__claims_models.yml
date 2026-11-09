@@ -1,0 +1,64 @@
+version: 2
+
+models:
+  - name: rpt_loss_development_triangle
+    description: >
+      Loss development triangle by line of business: for each origin period (accident year, or
+      accident quarter when triangle_grain = 'QUARTERLY') and development age in months,
+      cumulative net paid loss, case reserve, incurred loss and reported claim count, evaluated
+      at the age's period end on booked periods. Only cells evaluated on or before the
+      valuation date exist. Test-policy and deleted claims excluded; orphan claims included.
+    data_tests:
+      - dbt_utils.unique_combination_of_columns:
+          arguments:
+            combination_of_columns:
+              - triangle_grain
+              - line_of_business
+              - origin_period
+              - development_age_months
+      # No cell looks into the future. (That reported counts never decrease along an origin
+      # period is checked in tests/claims/assert_triangle_reported_counts_never_decrease.sql.)
+      - dbt_utils.expression_is_true:
+          arguments:
+            expression: "evaluation_date <= cast('{{ var(\"valuation_date\") }}' as date)"
+    columns:
+      - name: triangle_grain
+        description: ANNUAL (accident years, ages 12, 24, ...) or QUARTERLY (accident quarters, ages 3, 6, ...).
+        data_tests:
+          - not_null
+          - accepted_values:
+              arguments:
+                values: ['ANNUAL', 'QUARTERLY']
+      - name: line_of_business
+        description: AUTO or HOME.
+        data_tests:
+          - not_null
+          - accepted_values:
+              arguments:
+                values: ['AUTO', 'HOME']
+      - name: origin_period
+        description: "Accident year ('2023') or accident quarter ('2023-Q2')."
+        data_tests:
+          - not_null
+      - name: accident_year
+        description: Year of the origin period.
+      - name: origin_start_date
+        description: First day of the origin period.
+      - name: development_age_months
+        description: Months from the start of the origin period to the evaluation date.
+        data_tests:
+          - not_null
+      - name: evaluation_date
+        description: The date the cell is evaluated at (a period end date).
+        data_tests:
+          - not_null
+      - name: evaluation_period
+        description: Accounting period ending on evaluation_date; events booked up to it count.
+      - name: cumulative_paid_loss_amount
+        description: Net paid loss (payments - recoveries - voids) booked by the evaluation period.
+      - name: case_reserve_loss_amount
+        description: Outstanding loss case reserve at the evaluation period end.
+      - name: cumulative_incurred_loss_amount
+        description: cumulative_paid_loss_amount + case_reserve_loss_amount (reported incurred, without IBNR).
+      - name: reported_claim_count
+        description: Claims reported by the evaluation date.
