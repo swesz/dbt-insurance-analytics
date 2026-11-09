@@ -66,6 +66,8 @@ def generate(cfg: Config, verbose: bool = True) -> Result:
     control_rows = control_total_rows(cfg, sub)
     items = ["accounting_period,account_number,line_of_business,amount,item_type,explanation"]
     for period, account, lob, cents, item_type, why in ledger.reconciling_items:
+        if cents == 0:
+            continue
         items.append(f"{period},{account},{lob},{format_cents(cents)},{item_type},{why}")
     summary = build_summary(policy_book, claims_book, sub, cfg.valuation_date)
     extra = {
