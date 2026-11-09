@@ -21,6 +21,9 @@
 --    broad sense: "incurred but not reported" claims that happened but have not reached us yet
 --    (pure IBNR), plus the future development of claims already reported, whose case reserves
 --    will turn out too low or too high (IBNER, "incurred but not enough reported").
+--    It can be negative: home property reserves here tend to be set high and released as claims
+--    settle, so an incurred factor below 1 projects a young accident year *down*. A negative
+--    estimate says the case reserves are expected to be redundant, not that claims are negative.
 --
 -- IBNR is an estimate, not source data. No system records it; it is the actuary's projection
 -- from patterns like these, and it changes with the method, the averaging, the tail factor and
@@ -140,7 +143,8 @@ final as (
         round(cumulative_development_factor, 4) as factor,
         reported_amount,
         estimated_ultimate_amount,
-        estimated_ultimate_amount - reported_amount as estimated_ibnr_amount
+        -- The factors are floating point, so the estimates are rounded back to cents.
+        round(estimated_ultimate_amount - reported_amount, 2) as estimated_ibnr_amount
     from projections
 )
 

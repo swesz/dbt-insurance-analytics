@@ -5,7 +5,8 @@
 --   DELETED_CLAIMS            claim and exposure keys whose latest version is a delete (dropped)
 --   CDC_DUPLICATE_VERSIONS    raw rows collapsed as re-loaded copies of a version, per table
 --   ORPHAN_CLAIMS             claims with no matching policy (kept, flagged)
---   MALFORMED_POLICY_NUMBERS  claims whose typed policy number needed normalizing
+--   MALFORMED_POLICY_NUMBERS  claim versions (rows, as the generator counts them) whose typed
+--                             policy number needed normalizing
 --   LOSS_OUTSIDE_TERM         claims whose loss date no covering term includes (kept, flagged)
 --
 -- The planted counts describe the default (valuation-date) load, so the comparison runs only on
@@ -31,10 +32,6 @@ planted_issues as (
 
 claim_versions as (
     select * from {{ ref('stg_claims__claim_versions') }}
-),
-
-staged_claims as (
-    select * from {{ ref('stg_claims__claims') }}
 ),
 
 claims as (
@@ -96,8 +93,9 @@ actual as (
 
     union all
 
+    -- A claim typed with a bad number keeps it in later versions; staging normalizes each one.
     select 'MALFORMED_POLICY_NUMBERS', 'claims.claims', count(*)
-    from staged_claims
+    from claim_versions
     where is_policy_number_malformed
 
     union all
