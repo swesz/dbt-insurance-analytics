@@ -43,6 +43,10 @@ accounting_periods as (
     select * from {{ ref('accounting_periods') }}
 ),
 
+load_info as (
+    select * from {{ ref('stg_generator_audit__load_info') }}
+),
+
 -- age_offset_months shifts the ages back from whole origin periods. For ANNUAL_AT_VALUATION it
 -- is the number of months from the valuation date's month end to the year end (3 for
 -- September), so the ages are 12 - 3 = 9, 24 - 3 = 21, ... and every evaluation date falls in
@@ -66,7 +70,8 @@ triangle_grains as (
         'ANNUAL_AT_VALUATION' as triangle_grain,
         'year' as origin_date_part,
         12 as months_per_origin_period,
-        12 - month(cast('{{ var("valuation_date") }}' as date)) as age_offset_months
+        12 - month(load_info.valuation_date) as age_offset_months
+    from load_info
 ),
 
 -- Loss events per origin period and booked period, for each grain.
@@ -141,7 +146,8 @@ evaluated_cells as (
     from cells
     inner join accounting_periods
         on cells.evaluation_date = accounting_periods.period_end_date
-    where cells.evaluation_date <= cast('{{ var("valuation_date") }}' as date)
+    cross join load_info
+    where cells.evaluation_date <= load_info.valuation_date
 ),
 
 cell_amounts as (

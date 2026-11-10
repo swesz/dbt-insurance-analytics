@@ -51,7 +51,7 @@ models:
       - name: is_period_end
         description: True on the last day of an accounting period.
       - name: is_on_or_before_valuation
-        description: True on and before the valuation date (var valuation_date).
+        description: True on and before the valuation date (stg_generator_audit__load_info).
 
   - name: dim_accounting_periods
     description: >

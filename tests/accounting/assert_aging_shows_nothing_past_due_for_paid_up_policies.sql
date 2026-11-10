@@ -39,6 +39,10 @@ aging as (
     select * from {{ ref('rpt_premium_receivable_aging') }}
 ),
 
+load_info as (
+    select * from {{ ref('stg_generator_audit__load_info') }}
+),
+
 billed as (
     select
         installments.policy_id,
@@ -73,12 +77,13 @@ billed_by_policy as (
         sum(case
             when installment_amount > 0
                 and transaction_type <> 'REINSTATEMENT'
-                and due_date < cast('{{ var("valuation_date") }}' as date)
+                and due_date < load_info.valuation_date
                 then installment_amount
             else 0
         end) as due_before_valuation_amount,
         bool_or(transaction_type = 'REINSTATEMENT') as has_reinstatement
     from billed
+    cross join load_info
     group by all
 ),
 

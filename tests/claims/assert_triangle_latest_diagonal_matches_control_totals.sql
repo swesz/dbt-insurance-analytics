@@ -71,7 +71,10 @@ actual as (
         from triangle
         inner join grains_at_valuation
             on triangle.triangle_grain = grains_at_valuation.triangle_grain
-        where triangle.evaluation_date = cast('{{ var("valuation_date") }}' as date)
+        -- The load's own row: the same valuation date the models read through
+        -- stg_generator_audit__load_info.
+        cross join load_info
+        where triangle.evaluation_date = load_info.valuation_date
         group by all
     ) unpivot (value for metric in (incurred_loss, paid_loss_net, claim_count))
 ),

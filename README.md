@@ -20,7 +20,7 @@ Each figure was checked by something other than the code that produced it.
 
 | Check | Result |
 |---|---|
-| Build | `dbt build` into empty dev and prod databases: 783 nodes each, 0 errors, about a minute each |
+| Build | `dbt build` into empty dev and prod databases: 787 nodes each, 0 errors, about a minute each |
 | Warnings | 2, both planted defects that are kept and flagged on purpose, at their exact planted counts: 13 losses outside the policy term, 5 orphan claims |
 | Control totals | all 1,056 figures the generator computed in Python (11 metrics, by period or accident year and line) equal the SQL results |
 | General ledger | 1,570 account × source system × period × line rows (2022-01 to 2026-08): 1,564 match, 6 are the two documented reconciling items, 0 unexplained, with no tolerance |

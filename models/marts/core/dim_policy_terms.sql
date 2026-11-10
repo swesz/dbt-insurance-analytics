@@ -13,6 +13,10 @@ lines as (
     select * from {{ ref('int_premium__transaction_lines_booked') }}
 ),
 
+load_info as (
+    select * from {{ ref('stg_generator_audit__load_info') }}
+),
+
 term_premium as (
     select
         term_id,
@@ -55,7 +59,7 @@ final as (
         -- date) is on or before the valuation date, so every line of the term is fully earned
         -- by then. A cancelled term counts by its expiration date too, not its cancellation
         -- date: its cancellation line earns (negatively) until the original expiration.
-        terms.term_expiration_date <= cast({{ dbt.dateadd('day', 1, "cast('" ~ var('valuation_date') ~ "' as date)") }} as date)
+        terms.term_expiration_date <= cast({{ dbt.dateadd('day', 1, 'load_info.valuation_date') }} as date)
             as is_expired_at_valuation,
         -- The source's running total, and the same figure rebuilt from the transactions.
         terms.term_written_premium,
@@ -68,6 +72,7 @@ final as (
         on terms.policy_id = policies.policy_id
     left join term_premium
         on terms.term_id = term_premium.term_id
+    cross join load_info
     where not terms.is_test_policy
 )
 

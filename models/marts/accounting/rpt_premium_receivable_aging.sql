@@ -43,6 +43,10 @@ accounting_periods as (
     select * from {{ ref('dim_accounting_periods') }}
 ),
 
+load_info as (
+    select * from {{ ref('stg_generator_audit__load_info') }}
+),
+
 valuation_period as (
     select accounting_period
     from accounting_periods
@@ -130,7 +134,7 @@ final as (
         joined.policy_id,
         policies.policy_number,
         policies.line_of_business,
-        cast('{{ var("valuation_date") }}' as date) as valuation_date,
+        load_info.valuation_date,
         cast(joined.billed_amount as decimal(18, 2)) as billed_amount,
         cast(joined.collected_amount as decimal(18, 2)) as collected_amount,
         cast(joined.billed_amount - joined.collected_amount as decimal(18, 2))
@@ -151,6 +155,7 @@ final as (
     from joined
     left join policies
         on joined.policy_id = policies.policy_id
+    cross join load_info
 )
 
 select * from final

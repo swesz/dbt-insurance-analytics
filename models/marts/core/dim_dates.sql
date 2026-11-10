@@ -10,6 +10,10 @@ with accounting_periods as (
     select * from {{ periods_relation }}
 ),
 
+load_info as (
+    select * from {{ ref('stg_generator_audit__load_info') }}
+),
+
 date_spine as (
     {{ dbt_utils.date_spine(datepart='day', start_date=spine_start, end_date=spine_end) }}
 ),
@@ -40,11 +44,12 @@ final as (
         accounting_periods.fiscal_quarter,
         accounting_periods.period_end_date,
         days.date_day = accounting_periods.period_end_date as is_period_end,
-        days.date_day <= cast('{{ var("valuation_date") }}' as date) as is_on_or_before_valuation
+        days.date_day <= load_info.valuation_date as is_on_or_before_valuation
     from days
     inner join accounting_periods
         on days.date_day between accounting_periods.period_start_date
             and accounting_periods.period_end_date
+    cross join load_info
 )
 
 select * from final

@@ -13,7 +13,8 @@
 --   general_ledger          Fivetran-style file connector over monthly CSV exports:
 --                           every column arrives as text, plus _file/_line/_modified.
 --   generator_audit         Generated-data answer key: facts the generator knows and a
---                           real warehouse would not; used by tests, never by models.
+--                           real warehouse would not; used by tests, never by models,
+--                           except load_info.valuation_date (D-024).
 
 create schema if not exists policy_admin;
 create schema if not exists billing;
@@ -243,7 +244,8 @@ create or replace table general_ledger.journal_lines (
 );
 
 -- ---------------------------------------------------------------------------------------------
--- generator_audit: answer key of the generated data. Models must never select from it.
+-- generator_audit: answer key of the generated data. Models must never select from it, except
+-- load_info.valuation_date through stg_generator_audit__load_info (D-024).
 -- ---------------------------------------------------------------------------------------------
 
 create or replace table generator_audit.load_info (

@@ -472,7 +472,7 @@ models:
         data_tests:
           - not_null
       - name: valuation_date
-        description: The date the aging is at (var valuation_date).
+        description: The date the aging is at (stg_generator_audit__load_info).
         data_tests:
           - not_null
       - name: billed_amount

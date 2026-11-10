@@ -13,6 +13,13 @@ pytest                                    # generator/tests, at scale 0.05, a fe
 GENERATOR_TEST_SCALE=1.0 pytest           # the same checks on the full book
 ```
 
+dbt reads the valuation date from the load (`generator_audit.load_info`), so another
+`--valuation-date` needs no dbt setting (D-024). It must be a month end: the loss triangle's
+valuation-date grain assumes one. `seeds/gl_reconciling_items.csv` documents the default run's
+planted ledger items, though, and another valuation date plants a different claims timing item:
+until the seed is updated from `gl_reconciling_items_expected.csv`, the reconciliation test
+fails (12 rows at 2026-03-31).
+
 The specification is `docs/source-systems.md`; the raw table layout is `loader/raw_schema.sql`.
 Reference data shared with dbt (coverages, states, loss causes, catastrophe events, the
 accounting calendar, GL accounts, claim status codes) is read from `seeds/`, never copied.

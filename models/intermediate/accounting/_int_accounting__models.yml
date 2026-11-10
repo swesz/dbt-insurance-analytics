@@ -278,10 +278,10 @@ unit_tests:
       open is the installment whose nonpayment caused the cancellation. A credit that was
       refunded settles nothing.
     model: int_accounting__installment_allocation
-    overrides:
-      vars:
-        valuation_date: '2026-09-30'
     given:
+      - input: ref('stg_generator_audit__load_info')
+        rows:
+          - {valuation_date: '2026-09-30'}
       - input: ref('stg_billing__installments')
         rows:
           - {installment_id: 1, policy_id: 1, term_id: 10, transaction_id: 100, installment_number: 1, due_date: '2026-03-01', installment_amount: 100.00, is_test_policy: false}
@@ -353,10 +353,10 @@ unit_tests:
       customer who paid on time shows nothing past due; a credit settles its own term before
       any other.
     model: int_accounting__installment_allocation
-    overrides:
-      vars:
-        valuation_date: '2026-09-30'
     given:
+      - input: ref('stg_generator_audit__load_info')
+        rows:
+          - {valuation_date: '2026-09-30'}
       - input: ref('stg_billing__installments')
         rows:
           - {installment_id: 31, policy_id: 3, term_id: 30, transaction_id: 300, installment_number: 1, due_date: '2026-03-01', installment_amount: 100.00, is_test_policy: false}
