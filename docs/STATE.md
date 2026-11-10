@@ -1,8 +1,8 @@
 # Project state (handover)
 
 Third handover, written 2026-11-08 after the review fixes were merged and the merged code was
-verified from scratch. What is left is the push. Rewrite or delete this file before the repo
-becomes public.
+verified from scratch, updated 2026-11-09 with the first pull request ("In review"). Rewrite or
+delete this file before the repo becomes public.
 
 ## Done and verified on the merged code [V, 2026-11-08]
 - All three review branches (premium, claims, accounting) are merged into main. Their worktrees
@@ -45,6 +45,19 @@ becomes public.
   GitHub annotated that `ubuntu-latest` is moving to Ubuntu 26 (from 2026-10-19).
 - Q-003 done: `test01_employee_api` and `test02_hr_ext-api` are private (neither had stars or
   forks); `Financial-Sentiment-ML-DeepLearning` stays public.
+
+## In review [2026-11-09]
+- Changes now go through pull requests: branch, push only that branch, `gh pr create`; the owner
+  reviews in written PR comments; address them; merge only after the owner approves and CI
+  passes.
+- PR #1, branch `valuation-date-from-load`: the valuation date read from the load (D-024,
+  status proposed). Verified locally [V]: dev, prod and replayed-close builds 782 pass, 2 warn,
+  0 error, 787 nodes; all 61 relations identical to main row by row (prod and the replay differ
+  only by the float noise in the open items); on data valued 2026-03-31, 13 of 13 valuation
+  checks against raw (main: 1 of 13). The PR description has the full table and both check
+  scripts.
+- After the review: answer each comment in the PR, push fixes to the same branch, then on
+  merge set D-024 to accepted and delete the branch.
 
 ## Next steps
 1. Before going public: the owner reviews everything (Q-001), Q-004 and Q-005 are answered, and
