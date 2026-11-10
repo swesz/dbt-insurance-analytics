@@ -18,8 +18,10 @@ Instructions for Claude Code in this repo.
   `source .venv/Scripts/activate` (Git Bash).
 - Data: `python -m generator`, then `python -m loader` (writes `warehouse/raw.duckdb`).
 - dbt: `dbt deps`, then `dbt build`. `--target prod` builds `warehouse/prod.duckdb`.
-- Parallel work: give each job its own dev file and target directory:
-  `DBT_DUCKDB_DEV_PATH=warehouse/dev_<name>.duckdb`, `DBT_TARGET_PATH=target_<name>`.
+- Parallel work: give each job its own dev file, target and log directory:
+  `DBT_DUCKDB_DEV_PATH=warehouse/dev_<name>.duckdb`, `DBT_TARGET_PATH=target_<name>`,
+  `DBT_LOG_PATH=logs_<name>`, and `DBT_DUCKDB_RAW_PATH` when it needs different raw data.
+- Open questions (Q-###) and known limitations are in `docs/open-items.md`.
 - Python tests: `pytest`.
 
 ## SQL conventions
@@ -34,5 +36,7 @@ Instructions for Claude Code in this repo.
   are learning analytics engineering, so a short explanation of a non-obvious rule is welcome.
 - Every model has a YAML entry with a description, its primary key tested `unique` and
   `not_null`, and descriptions for its columns.
-- Known source defects are tested with `severity: warn` and thresholds, so the build stays green
-  and the count stays visible. See `docs/data-issues.md`.
+- Known source defects are tested with `severity: error` plus `warn_if` and `error_if`
+  thresholds: the planted count warns, so the build stays green and the count stays visible,
+  and a count above the threshold fails. Not `severity: warn`: with it dbt never evaluates
+  `error_if`, so the test could never fail. See `docs/data-issues.md`.

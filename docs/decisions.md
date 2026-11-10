@@ -250,4 +250,4 @@ IDs are permanent and never reused. Status: proposed, accepted, superseded (by D
   happen at a small `--scale` [E].
 - Not changed: on an as-of load earlier than the valuation date (the close simulation's
   replays), `load_info.valuation_date` is still the generator's, as the var was. Q-006 in
-  `docs/STATE.md`.
+  `docs/open-items.md`.
