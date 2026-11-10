@@ -6,7 +6,9 @@ What it checks, over every tracked file AND every commit in the history (a file 
 is still in the history, and a push publishes the history):
 
 1. Commit identities: every author and committer email must be a GitHub noreply address
-   (or a bot/co-author noreply address in a trailer).
+   (or a bot/co-author noreply address in a trailer). GitHub's own service address counts:
+   GitHub is the committer of the merge commits it creates, both the temporary one a pull
+   request's CI run checks out and the one its merge button adds to main.
 2. Local paths: no absolute home-directory paths (C:\\Users\\<name>, /c/Users/<name>,
    /home/<name>, /Users/<name>), which would reveal the machine's user name.
 3. Email addresses: only placeholder domains (example.com) and noreply addresses.
@@ -29,7 +31,11 @@ from pathlib import Path
 
 ALLOWED_EMAIL = re.compile(
     r"(@users\.noreply\.github\.com|@noreply\.github\.com|noreply@anthropic\.com"
-    r"|@example\.com|@test\.example\.com)$",
+    r"|@example\.com|@test\.example\.com"
+    # GitHub's service identity, matched whole (^...$): it is not a person's address. A
+    # suffix match would also let through a person's github.com address that merely ends in
+    # the same characters.
+    r"|^noreply@github\.com)$",
     re.IGNORECASE,
 )
 EMAIL = re.compile(r"[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}")
