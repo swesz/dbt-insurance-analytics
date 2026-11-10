@@ -212,9 +212,12 @@ IDs are permanent and never reused. Status: proposed, accepted, superseded (by D
 - Status: proposed 2026-11-09 (pull request; accepted when merged)
 - `stg_generator_audit__load_info` selects `valuation_date` from `raw.generator_audit.load_info`,
   which the loader fills from the generator's metadata. Every model, the
-  `claims_valuation_period` macro, the chain-ladder analysis and the tests take the date from
-  it (models and the macro cross join it). The `valuation_date` var is removed, so a leftover
-  `var('valuation_date')` fails to compile instead of using a stale date.
+  `claims_valuation_period` macro, the chain-ladder analysis and the tests that used the var
+  take the date from it (models and the macro cross join it). The one exception is
+  `assert_triangle_latest_diagonal_matches_control_totals`, which compares with the answer key
+  and so reads `load_info` from the source, as it already did for `as_of`. The `valuation_date`
+  var is removed, so a leftover `var('valuation_date')` fails to compile instead of using a
+  stale date.
 - Reason: the var and the data could disagree. Data generated with
   `--valuation-date 2026-03-31`, built with the var still at 2026-09-30, valued everything six
   months past the end of the data: 2026 auto earned premium 8,510,765.84 against the

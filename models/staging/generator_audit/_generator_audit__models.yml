@@ -3,8 +3,9 @@ version: 2
 models:
   - name: stg_generator_audit__load_info
     description: >
-      The load's valuation date, one row. The only place models, macros, the analysis and tests
-      get the valuation date from (D-024), so it always matches the loaded data. The only model
+      The load's valuation date, one row. The only place models, macros and the analysis get the
+      valuation date from (D-024), so it always matches the loaded data; tests that compare with
+      the answer key may still read load_info from the source. The only model
       that reads generator_audit, and it passes on nothing but this column: the control totals
       and planted-issue counts stay for tests. tests/generator_audit/assert_one_valuation_date.sql
       requires exactly one row, because every consumer cross joins it.

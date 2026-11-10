@@ -48,8 +48,10 @@ delete this file before the repo becomes public.
 
 ## In review [2026-11-09]
 - Changes now go through pull requests: branch, push only that branch, `gh pr create`; the owner
-  reviews in written PR comments; address them; merge only after the owner approves and CI
-  passes.
+  reviews in written PR comments; address them; merge only after the owner's go-ahead in a PR
+  comment and a passing CI run. GitHub does not let a pull request's author approve it, and
+  branch protection is not available for a private repo on the free plan (the API returns 403
+  [V]), so GitHub enforces neither: its merge button works even with a failing check.
 - PR #1, branch `valuation-date-from-load`: the valuation date read from the load (D-024,
   status proposed). Verified locally [V]: dev, prod and replayed-close builds 782 pass, 2 warn,
   0 error, 787 nodes; all 61 relations identical to main row by row (prod and the replay differ
@@ -58,13 +60,18 @@ delete this file before the repo becomes public.
   scripts.
 - After the review: answer each comment in the PR, push fixes to the same branch, then on
   merge set D-024 to accepted and delete the branch.
-- CI fails on PR #1, and would on any pull request, at the public-safety step [V, run
-  42745261423]: a `pull_request` run checks out GitHub's synthetic merge commit, whose committer
-  is `GitHub <noreply@github.com>`, and `scripts/check_public_safety.py` accepts only
-  `@users.noreply.github.com`, `@noreply.github.com` and the trailer addresses. Merging with
-  GitHub's button would put the same committer on main. Not fixed: the scanner is a safety
-  control, so the owner decides (allow exactly `noreply@github.com`, in its own PR first, is the
-  proposal).
+- PR #1's first CI runs (42745261423, 42745482373) failed at the public-safety step: a
+  `pull_request` run checks out GitHub's merge commit, whose committer is
+  `GitHub <noreply@github.com>`, and the scanner then accepted only personal noreply addresses.
+  Fixed in PR #2 (merged), which accepts exactly that address. A re-run reuses the run's
+  original merge commit, built on main from before #2 (GitHub's documented behavior, not
+  tried), so main was merged into the branch instead, which starts a fresh run.
+- Rechecked 2026-11-09 on the merge of the branch into main, with GitHub as committer, as CI
+  sees it [V]: scan 0 errors; `pytest` 18 passed; `dbt build` 782 pass, 2 warn (13, 5), 0 error,
+  787 nodes; on data valued 2026-03-31, 781 pass and only the known reconciliation seed failure
+  (12 rows). A separate check script (expected values from `load_info` and the control totals
+  only) passed 10 of 10 on both data sets, including claims incurred by accident year, which
+  reach the date through the `claims_valuation_period` macro.
 
 ## Next steps
 1. Before going public: the owner reviews everything (Q-001), Q-004 and Q-005 are answered, and
