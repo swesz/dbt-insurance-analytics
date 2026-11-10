@@ -63,9 +63,16 @@ Logged in on 2026-11-08 as swesz (keyring), HTTPS, scopes gist, read:org, repo, 
 
 ## Open items from the reviews (not fixed, low risk)
 - Premium: `coverage_start_date` / `coverage_end_date` mean the earning window in the line
-  models but the coverage period in `dim_policy_terms`; `valuation_date` is a fixed var, not
-  read from `load_info`; the data has no cancellation or reinstatement booked after a close;
-  date columns `date_day` and `date_of_birth` break the `_date` naming rule.
+  models but the coverage period in `dim_policy_terms`; the data has no cancellation or
+  reinstatement booked after a close; date columns `date_day` and `date_of_birth` break the
+  `_date` naming rule. (The fixed `valuation_date` var is replaced by the load's date: D-024.)
+- Premium: `fct_policy_month_end.in_force_term_premium` and `annualized_in_force_premium` are
+  not reproducible to the cent. `written_premium * term_days / window_days` divides a DECIMAL,
+  which DuckDB returns as DOUBLE, so the sum depends on the parallel summation order, and a
+  term whose exact value is a half cent rounds either way (term 53650: exactly 468.835, summed
+  as 468.83499...). Two builds of the same code on the same data differed by 0.01 in 1 to 3
+  terms, every other column and table identical; every build passed [V, 2026-11-09]. Likely
+  fix: keep the division in DECIMAL, or round per line before summing [E].
 - Claims: the generator checks a catastrophe loss against the term only at the event start;
   roughly one seed in 5-8 could fail the planted-count test [E]. Not seen at seed 42.
 - Accounting: every recovery is posted to 5050; an expense recovery would be misposted (comment
@@ -73,6 +80,11 @@ Logged in on 2026-11-08 as swesz (keyring), HTTPS, scopes gist, read:org, repo, 
   up (99 qualify at scale 1.0), so a very small `--scale` could fail it.
 - The generator's `gl_reconciling_items_expected.csv` has no `source_system` column; the README
   in `generator/` says so.
+- `seeds/gl_reconciling_items.csv` fits the default run only. Data generated with
+  `--valuation-date 2026-03-31` plants a different 2025-08 claims timing item (auto 5000
+  -15,993.24 instead of -11,926.78, plus 5200 and home lines), so
+  `assert_reconciliation_has_no_unexplained_difference` fails with 12 rows; each equals the
+  generator's planted item exactly [V, 2026-11-09]. Every other test passes on that data.
 
 ## Owner decisions (2026-11-08)
 DuckDB only, newest versions. Three databases: raw, dev, prod. Generated data with planted
@@ -91,6 +103,12 @@ trailers and a README paragraph on how the project was built. GitHub CLI only. P
   with `warn_if`/`error_if`. Owner to decide on the wording. Open.
 - Q-005: The BigQuery sandbox's DML restriction in the README is confirmed only by Google's 2019
   launch post; verify it on the current page before going public. Open.
+- Q-006: On an as-of load earlier than the valuation date (`python -m loader --as-of
+  2025-06-05T23:59:59`), the data stops at the as-of, but `load_info.valuation_date`, and with
+  it every model, stays at the generator's date, as the var did (D-024). The close simulation
+  only snapshots those loads, so nothing built today is affected. Should the models value at
+  `least(valuation_date, cast(as_of as date))` so that a full build on a replay is consistent?
+  The control-total tests skip such loads, so this would need its own check. Open.
 
 ## Working pattern for parallel jobs
 Give each job its own files: `DBT_DUCKDB_DEV_PATH=warehouse/dev_<name>.duckdb`,
