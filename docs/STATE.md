@@ -1,7 +1,7 @@
 # Project state (handover)
 
 Third handover, written 2026-11-08 after the review fixes were merged and the merged code was
-verified from scratch, updated 2026-11-09 with the first pull request ("In review"). Rewrite or
+verified from scratch, updated 2026-11-09 with the first pull requests ("Pull requests"). Rewrite or
 delete this file before the repo becomes public.
 
 ## Done and verified on the merged code [V, 2026-11-08]
@@ -46,20 +46,21 @@ delete this file before the repo becomes public.
 - Q-003 done: `test01_employee_api` and `test02_hr_ext-api` are private (neither had stars or
   forks); `Financial-Sentiment-ML-DeepLearning` stays public.
 
-## In review [2026-11-09]
+## Pull requests [2026-11-09]
 - Changes now go through pull requests: branch, push only that branch, `gh pr create`; the owner
   reviews in written PR comments; address them; merge only after the owner's go-ahead in a PR
   comment and a passing CI run. GitHub does not let a pull request's author approve it, and
   branch protection is not available for a private repo on the free plan (the API returns 403
   [V]), so GitHub enforces neither: its merge button works even with a failing check.
 - PR #1, branch `valuation-date-from-load`: the valuation date read from the load (D-024,
-  status proposed). Verified locally [V]: dev, prod and replayed-close builds 782 pass, 2 warn,
+  accepted). Verified locally [V]: dev, prod and replayed-close builds 782 pass, 2 warn,
   0 error, 787 nodes; all 61 relations identical to main row by row (prod and the replay differ
   only by the float noise in the open items); on data valued 2026-03-31, 13 of 13 valuation
   checks against raw (main: 1 of 13). The PR description has the full table and both check
   scripts.
-- After the review: answer each comment in the PR, push fixes to the same branch, then on
-  merge set D-024 to accepted and delete the branch.
+- Review of PR #1: the owner gave the go-ahead after a green CI run. D-024 was set to accepted
+  on the branch before the merge, so the merge brings it to main; the branch is deleted on
+  merge.
 - PR #1's first CI runs (42745261423, 42745482373) failed at the public-safety step: a
   `pull_request` run checks out GitHub's merge commit, whose committer is
   `GitHub <noreply@github.com>`, and the scanner then accepted only personal noreply addresses.

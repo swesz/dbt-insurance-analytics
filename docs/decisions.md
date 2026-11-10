@@ -209,7 +209,7 @@ IDs are permanent and never reused. Status: proposed, accepted, superseded (by D
 - Cost: the image has to be moved by hand when GitHub retires it.
 
 ## D-024: The valuation date is read from the load, through a one-row model
-- Status: proposed 2026-11-09 (pull request; accepted when merged)
+- Status: accepted 2026-11-09 (pull request #1)
 - `stg_generator_audit__load_info` selects `valuation_date` from `raw.generator_audit.load_info`,
   which the loader fills from the generator's metadata. Every model, the
   `claims_valuation_period` macro, the chain-ladder analysis and the tests that used the var
