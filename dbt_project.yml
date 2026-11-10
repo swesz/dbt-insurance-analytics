@@ -16,8 +16,8 @@ flags:
   send_anonymous_usage_stats: false
 
 vars:
-  # The last day the generator simulates. Month-end tables stop at the period containing it.
-  valuation_date: "2026-09-30"
+  # The valuation date is not a var: models read it from the load, so it always matches the
+  # data (models/staging/generator_audit/stg_generator_audit__load_info.sql, D-024).
   history_start_date: "2022-01-01"
   # fct_claim_transactions reprocesses rows loaded this many days before its high-water mark,
   # so late-arriving CDC rows are picked up (see the model's header).

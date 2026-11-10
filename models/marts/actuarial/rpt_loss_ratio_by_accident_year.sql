@@ -41,6 +41,10 @@ claims as (
     select * from {{ ref('dim_claims') }}
 ),
 
+load_info as (
+    select * from {{ ref('stg_generator_audit__load_info') }}
+),
+
 earned_by_year as (
     select
         year(periods.period_end_date) as calendar_year,
@@ -99,13 +103,13 @@ final as (
     select
         cast(accident_year as integer) as accident_year,
         line_of_business,
-        cast('{{ var("valuation_date") }}' as date) as valuation_date,
+        load_info.valuation_date,
         -- Months from the start of the accident year to the valuation date: 9 for accident
         -- year 2026 at a 2026-09-30 valuation, 21 for 2025, and so on. The same ages as the
         -- triangle's ANNUAL_AT_VALUATION cells (not its year-end ANNUAL ones).
         cast(
-            (year(cast('{{ var("valuation_date") }}' as date)) - accident_year) * 12
-                + month(cast('{{ var("valuation_date") }}' as date))
+            (year(load_info.valuation_date) - accident_year) * 12
+                + month(load_info.valuation_date)
         as integer) as development_age_months,
         cast(earned_months as integer) as earned_months,
         cast(earned_premium as decimal(18, 2)) as earned_premium,
@@ -122,6 +126,7 @@ final as (
         {{ actuarial_ratio('non_catastrophe_incurred_loss_amount', 'earned_premium') }}
             as non_catastrophe_incurred_loss_ratio
     from combined
+    cross join load_info
 )
 
 select * from final

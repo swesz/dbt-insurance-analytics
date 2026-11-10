@@ -1,8 +1,8 @@
 # Project state (handover)
 
 Third handover, written 2026-11-08 after the review fixes were merged and the merged code was
-verified from scratch. What is left is the push. Rewrite or delete this file before the repo
-becomes public.
+verified from scratch, updated 2026-11-09 with the first pull requests ("Pull requests"). Rewrite or
+delete this file before the repo becomes public.
 
 ## Done and verified on the merged code [V, 2026-11-08]
 - All three review branches (premium, claims, accounting) are merged into main. Their worktrees
@@ -46,6 +46,34 @@ becomes public.
 - Q-003 done: `test01_employee_api` and `test02_hr_ext-api` are private (neither had stars or
   forks); `Financial-Sentiment-ML-DeepLearning` stays public.
 
+## Pull requests [2026-11-09]
+- Changes now go through pull requests: branch, push only that branch, `gh pr create`; the owner
+  reviews in written PR comments; address them; merge only after the owner's go-ahead in a PR
+  comment and a passing CI run. GitHub does not let a pull request's author approve it, and
+  branch protection is not available for a private repo on the free plan (the API returns 403
+  [V]), so GitHub enforces neither: its merge button works even with a failing check.
+- PR #1, branch `valuation-date-from-load`: the valuation date read from the load (D-024,
+  accepted). Verified locally [V]: dev, prod and replayed-close builds 782 pass, 2 warn,
+  0 error, 787 nodes; all 61 relations identical to main row by row (prod and the replay differ
+  only by the float noise in the open items); on data valued 2026-03-31, 13 of 13 valuation
+  checks against raw (main: 1 of 13). The PR description has the full table and both check
+  scripts.
+- Review of PR #1: the owner gave the go-ahead after a green CI run. D-024 was set to accepted
+  on the branch before the merge, so the merge brings it to main; the branch is deleted on
+  merge.
+- PR #1's first CI runs (42745261423, 42745482373) failed at the public-safety step: a
+  `pull_request` run checks out GitHub's merge commit, whose committer is
+  `GitHub <noreply@github.com>`, and the scanner then accepted only personal noreply addresses.
+  Fixed in PR #2 (merged), which accepts exactly that address. A re-run reuses the run's
+  original merge commit, built on main from before #2 (GitHub's documented behavior, not
+  tried), so main was merged into the branch instead, which starts a fresh run.
+- Rechecked 2026-11-09 on the merge of the branch into main, with GitHub as committer, as CI
+  sees it [V]: scan 0 errors; `pytest` 18 passed; `dbt build` 782 pass, 2 warn (13, 5), 0 error,
+  787 nodes; on data valued 2026-03-31, 781 pass and only the known reconciliation seed failure
+  (12 rows). A separate check script (expected values from `load_info` and the control totals
+  only) passed 10 of 10 on both data sets, including claims incurred by accident year, which
+  reach the date through the `claims_valuation_period` macro.
+
 ## Next steps
 1. Before going public: the owner reviews everything (Q-001), Q-004 and Q-005 are answered, and
    this file is deleted or rewritten. Then
@@ -63,9 +91,16 @@ Logged in on 2026-11-08 as swesz (keyring), HTTPS, scopes gist, read:org, repo, 
 
 ## Open items from the reviews (not fixed, low risk)
 - Premium: `coverage_start_date` / `coverage_end_date` mean the earning window in the line
-  models but the coverage period in `dim_policy_terms`; `valuation_date` is a fixed var, not
-  read from `load_info`; the data has no cancellation or reinstatement booked after a close;
-  date columns `date_day` and `date_of_birth` break the `_date` naming rule.
+  models but the coverage period in `dim_policy_terms`; the data has no cancellation or
+  reinstatement booked after a close; date columns `date_day` and `date_of_birth` break the
+  `_date` naming rule. (The fixed `valuation_date` var is replaced by the load's date: D-024.)
+- Premium: `fct_policy_month_end.in_force_term_premium` and `annualized_in_force_premium` are
+  not reproducible to the cent. `written_premium * term_days / window_days` divides a DECIMAL,
+  which DuckDB returns as DOUBLE, so the sum depends on the parallel summation order, and a
+  term whose exact value is a half cent rounds either way (term 53650: exactly 468.835, summed
+  as 468.83499...). Two builds of the same code on the same data differed by 0.01 in 1 to 3
+  terms, every other column and table identical; every build passed [V, 2026-11-09]. Likely
+  fix: keep the division in DECIMAL, or round per line before summing [E].
 - Claims: the generator checks a catastrophe loss against the term only at the event start;
   roughly one seed in 5-8 could fail the planted-count test [E]. Not seen at seed 42.
 - Accounting: every recovery is posted to 5050; an expense recovery would be misposted (comment
@@ -73,6 +108,11 @@ Logged in on 2026-11-08 as swesz (keyring), HTTPS, scopes gist, read:org, repo, 
   up (99 qualify at scale 1.0), so a very small `--scale` could fail it.
 - The generator's `gl_reconciling_items_expected.csv` has no `source_system` column; the README
   in `generator/` says so.
+- `seeds/gl_reconciling_items.csv` fits the default run only. Data generated with
+  `--valuation-date 2026-03-31` plants a different 2025-08 claims timing item (auto 5000
+  -15,993.24 instead of -11,926.78, plus 5200 and home lines), so
+  `assert_reconciliation_has_no_unexplained_difference` fails with 12 rows; each equals the
+  generator's planted item exactly [V, 2026-11-09]. Every other test passes on that data.
 
 ## Owner decisions (2026-11-08)
 DuckDB only, newest versions. Three databases: raw, dev, prod. Generated data with planted
@@ -91,6 +131,12 @@ trailers and a README paragraph on how the project was built. GitHub CLI only. P
   with `warn_if`/`error_if`. Owner to decide on the wording. Open.
 - Q-005: The BigQuery sandbox's DML restriction in the README is confirmed only by Google's 2019
   launch post; verify it on the current page before going public. Open.
+- Q-006: On an as-of load earlier than the valuation date (`python -m loader --as-of
+  2025-06-05T23:59:59`), the data stops at the as-of, but `load_info.valuation_date`, and with
+  it every model, stays at the generator's date, as the var did (D-024). The close simulation
+  only snapshots those loads, so nothing built today is affected. Should the models value at
+  `least(valuation_date, cast(as_of as date))` so that a full build on a replay is consistent?
+  The control-total tests skip such loads, so this would need its own check. Open.
 
 ## Working pattern for parallel jobs
 Give each job its own files: `DBT_DUCKDB_DEV_PATH=warehouse/dev_<name>.duckdb`,

@@ -120,7 +120,7 @@ models:
               arguments:
                 values: ['AUTO', 'HOME']
       - name: valuation_date
-        description: The date losses are valued at (var valuation_date).
+        description: The date losses are valued at (stg_generator_audit__load_info).
       - name: development_age_months
         description: Months from the start of the accident year to the valuation date.
         data_tests:

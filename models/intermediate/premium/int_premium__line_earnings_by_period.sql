@@ -34,6 +34,10 @@ accounting_periods as (
     select * from {{ ref('accounting_periods') }}
 ),
 
+load_info as (
+    select * from {{ ref('stg_generator_audit__load_info') }}
+),
+
 periods as (
     select
         accounting_period,
@@ -41,8 +45,9 @@ periods as (
         period_end_date,
         cast({{ dbt.dateadd('day', -1, 'period_start_date') }} as date) as prior_period_end_date
     from accounting_periods
+    cross join load_info
     -- The data stops at the valuation date, so the month-end series stops at its period.
-    where period_start_date <= cast('{{ var("valuation_date") }}' as date)
+    where period_start_date <= load_info.valuation_date
 ),
 
 line_periods as (

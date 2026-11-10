@@ -67,6 +67,10 @@ accounting_periods as (
     select * from {{ ref('dim_accounting_periods') }}
 ),
 
+load_info as (
+    select * from {{ ref('stg_generator_audit__load_info') }}
+),
+
 valuation_period as (
     select accounting_period
     from accounting_periods
@@ -325,9 +329,9 @@ final as (
         cast(remaining_after_credit_amount - cash_applied_amount as decimal(18, 2))
             as open_amount,
         -- Positive once the due date has passed; 0 or less while not yet past due.
-        {{ dbt.datediff('due_date', "cast('" ~ var('valuation_date') ~ "' as date)", 'day') }}
-            as days_past_due
+        {{ dbt.datediff('due_date', 'load_info.valuation_date', 'day') }} as days_past_due
     from cash_applied
+    cross join load_info
 )
 
 select * from final

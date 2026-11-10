@@ -203,10 +203,10 @@ unit_tests:
       A normal line, a backdated endorsement catching up, a cancellation line and a zero-day
       window, through month-end ITD differences.
     model: int_premium__line_earnings_by_period
-    overrides:
-      vars:
-        valuation_date: '2024-07-31'
     given:
+      - input: ref('stg_generator_audit__load_info')
+        rows:
+          - {valuation_date: '2024-07-31'}
       - input: ref('int_premium__transaction_lines_booked')
         rows:
           - {transaction_line_id: 1, accounting_period: '2024-01', written_premium: 600.00,

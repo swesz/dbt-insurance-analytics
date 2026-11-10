@@ -1,17 +1,22 @@
 version: 2
 
 # Answer key written by the data generator. Tests compare model output with it.
-# Models must never select from these tables: a real warehouse would not have them.
+# Models must never select from these tables: a real warehouse would not have them. One
+# exception: stg_generator_audit__load_info passes on load_info.valuation_date, which is load
+# metadata, not an answer (D-024). Nothing else from here may reach a model.
 sources:
   - name: generator_audit
     database: raw
     schema: generator_audit
     description: >
       Facts the data generator knows about the data it produced: load metadata, control totals
-      computed in Python, and counts of planted defects. Used only by tests in tests/.
+      computed in Python, and counts of planted defects. Used by tests in tests/; models get
+      only the valuation date, through stg_generator_audit__load_info.
     tables:
       - name: load_info
-        description: One row describing the current load (as_of, seed, scale).
+        description: >
+          One row describing the current load (as_of, valuation_date, seed, scale). Its
+          valuation_date is the one column models read (stg_generator_audit__load_info, D-024).
       - name: control_totals
         description: >
           Figures computed by the generator in Python, long format (metric, grain, period,

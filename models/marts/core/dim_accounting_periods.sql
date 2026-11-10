@@ -6,6 +6,10 @@ with accounting_periods as (
     select * from {{ ref('accounting_periods') }}
 ),
 
+load_info as (
+    select * from {{ ref('stg_generator_audit__load_info') }}
+),
+
 final as (
     select
         accounting_period,
@@ -23,11 +27,12 @@ final as (
         fiscal_quarter,
         -- The valuation date is the last simulated day, observed at its end; a period whose
         -- close date is on or before it was closed by then.
-        close_date <= cast('{{ var("valuation_date") }}' as date) as is_closed_at_valuation,
-        cast('{{ var("valuation_date") }}' as date) between period_start_date and period_end_date
+        close_date <= load_info.valuation_date as is_closed_at_valuation,
+        load_info.valuation_date between period_start_date and period_end_date
             as is_valuation_period,
-        period_start_date > cast('{{ var("valuation_date") }}' as date) as is_after_valuation
+        period_start_date > load_info.valuation_date as is_after_valuation
     from accounting_periods
+    cross join load_info
 )
 
 select * from final

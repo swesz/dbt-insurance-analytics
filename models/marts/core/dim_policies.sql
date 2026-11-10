@@ -22,6 +22,10 @@ dwellings as (
     select * from {{ ref('stg_policy_admin__dwellings') }}
 ),
 
+load_info as (
+    select * from {{ ref('stg_generator_audit__load_info') }}
+),
+
 vehicle_summary as (
     select
         policy_id,
@@ -48,14 +52,15 @@ term_summary as (
         -- In force at the valuation date, by the rule in docs/source-systems.md 3e, applied to
         -- the current state of the terms.
         bool_or(
-            term_effective_date <= cast('{{ var("valuation_date") }}' as date)
-            and cast('{{ var("valuation_date") }}' as date) < term_expiration_date
+            term_effective_date <= load_info.valuation_date
+            and load_info.valuation_date < term_expiration_date
             and (
                 cancellation_effective_date is null
-                or cancellation_effective_date > cast('{{ var("valuation_date") }}' as date)
+                or cancellation_effective_date > load_info.valuation_date
             )
         ) as is_in_force_at_valuation
     from terms
+    cross join load_info
     group by 1
 ),
 

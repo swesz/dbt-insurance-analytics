@@ -207,3 +207,47 @@ IDs are permanent and never reused. Status: proposed, accepted, superseded (by D
   different system without any change in the repo. The first two CI runs passed on
   `ubuntu-26.04` [V].
 - Cost: the image has to be moved by hand when GitHub retires it.
+
+## D-024: The valuation date is read from the load, through a one-row model
+- Status: accepted 2026-11-09 (pull request #1)
+- `stg_generator_audit__load_info` selects `valuation_date` from `raw.generator_audit.load_info`,
+  which the loader fills from the generator's metadata. Every model, the
+  `claims_valuation_period` macro, the chain-ladder analysis and the tests that used the var
+  take the date from it (models and the macro cross join it). The one exception is
+  `assert_triangle_latest_diagonal_matches_control_totals`, which compares with the answer key
+  and so reads `load_info` from the source, as it already did for `as_of`. The `valuation_date`
+  var is removed, so a leftover `var('valuation_date')` fails to compile instead of using a
+  stale date.
+- Reason: the var and the data could disagree. Data generated with
+  `--valuation-date 2026-03-31`, built with the var still at 2026-09-30, valued everything six
+  months past the end of the data: 2026 auto earned premium 8,510,765.84 against the
+  generator's 3,581,462.14, auto policies in force 1,222 against 8,033, 8,623 policies past due
+  since dates after the data stops, and 7 failing tests [V, 2026-11-09].
+- An exception to the answer-key rule: models never read `generator_audit`, except this one
+  column. `load_info` is load metadata (what was loaded, and up to when), not an answer, and a
+  real warehouse would take the same fact from its pipeline's load metadata or a reporting
+  calendar [E]. The control totals and planted-issue counts stay test-only.
+- A one-row model rather than a `run_query` macro:
+  - The dependency is a node: the lineage graph and `dbt ls -s stg_generator_audit__load_info+`
+    show which models depend on the valuation date. A macro's query is hidden in Jinja, and dbt
+    sees the dependency only if the macro also calls `ref` or `source` at parse time.
+  - Plain SQL, nothing at compile time. A `run_query` macro queries the database every time a
+    model compiles, needs a placeholder while dbt parses, and a raw database must already be
+    loaded for `dbt compile` to work.
+  - Only staging models read `source()`; a macro called from marts would break that rule or
+    need this model anyway.
+  - Unit tests mock it with `given`, like any other input. A macro would need
+    `overrides: macros:` in each test.
+  - A test requires exactly one row (`tests/generator_audit/assert_one_valuation_date.sql`):
+    with none, every consumer's cross join would return no rows without an error; with two,
+    each would double. `dbt build` runs it before any model that reads the date.
+- Cost: the date is a column, not a literal in the compiled SQL. Each consumer has one more
+  import CTE and cross join, and the compiled SQL no longer shows the date. A warehouse that
+  prunes partitions only on constant filters would not prune on it [E]; no model here filters a
+  partitioned table, and DuckDB has none.
+- Rejected: a `run_query` macro (above). Deriving the date from the data, such as the latest
+  `created_at`: a guess that comes out a day early when the last simulated day is quiet, as can
+  happen at a small `--scale` [E].
+- Not changed: on an as-of load earlier than the valuation date (the close simulation's
+  replays), `load_info.valuation_date` is still the generator's, as the var was. Q-006 in
+  `docs/STATE.md`.

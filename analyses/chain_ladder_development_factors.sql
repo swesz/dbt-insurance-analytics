@@ -73,6 +73,10 @@ with triangle as (
     where triangle_grain = 'ANNUAL_AT_VALUATION'
 ),
 
+load_info as (
+    select * from {{ ref('stg_generator_audit__load_info') }}
+),
+
 -- Pair each cell with the same accident year's cell one age (12 months) later.
 cell_pairs as (
     select
@@ -118,9 +122,10 @@ cumulative_factors as (
 -- so that a valuation date with no cell (one that is not a month end) gives no projection
 -- instead of a stale one.
 latest_diagonal as (
-    select *
+    select triangle.*
     from triangle
-    where evaluation_date = cast('{{ var("valuation_date") }}' as date)
+    cross join load_info
+    where triangle.evaluation_date = load_info.valuation_date
 ),
 
 projections as (
