@@ -96,7 +96,7 @@ The models target a cloud warehouse workflow, but run on DuckDB, because BigQuer
 billing (the sandbox) cannot run this project. Google's
 [sandbox page](https://docs.cloud.google.com/bigquery/docs/sandbox) lists these limits:
 
-- no DML statements (MERGE, UPDATE, DELETE);
+- no DML statements, such as MERGE, UPDATE and DELETE;
 - no streaming and no Data Transfer Service;
 - every table, view and partition expires after 60 days;
 - a lifetime 10 GiB storage limit that is not refunded when data is deleted.
@@ -174,7 +174,7 @@ A number counts only if something other than the code that produced it agrees wi
 | `tests/` | Reconciliations, rollforwards, control totals, planted-defect counts |
 | `analyses/` | Chain-ladder development factors |
 | `seeds/` | Accounting calendar, coverages, states, loss causes, catastrophe events, GL accounts, reconciling items |
-| `docs/` | Specification, decisions, glossary, and a guide per domain |
+| `docs/` | Specification, decisions, open items, glossary, and a guide per domain |
 
 ## Learning path
 
