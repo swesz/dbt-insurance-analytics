@@ -58,6 +58,13 @@ delete this file before the repo becomes public.
   scripts.
 - After the review: answer each comment in the PR, push fixes to the same branch, then on
   merge set D-024 to accepted and delete the branch.
+- CI fails on PR #1, and would on any pull request, at the public-safety step [V, run
+  42745261423]: a `pull_request` run checks out GitHub's synthetic merge commit, whose committer
+  is `GitHub <noreply@github.com>`, and `scripts/check_public_safety.py` accepts only
+  `@users.noreply.github.com`, `@noreply.github.com` and the trailer addresses. Merging with
+  GitHub's button would put the same committer on main. Not fixed: the scanner is a safety
+  control, so the owner decides (allow exactly `noreply@github.com`, in its own PR first, is the
+  proposal).
 
 ## Next steps
 1. Before going public: the owner reviews everything (Q-001), Q-004 and Q-005 are answered, and
